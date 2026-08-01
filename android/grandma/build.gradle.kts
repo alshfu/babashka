@@ -1,0 +1,118 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
+}
+
+android {
+    namespace = "ru.pult.grandma"
+    compileSdk = 36
+
+    defaultConfig {
+        // Installed package id — neutral, Swedish (se.), никакого ru.
+        applicationId = "se.pult.app"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1"
+
+        // Адрес сигналинга задаётся при сборке; в паре он всё равно перезаписывается
+        // тем, что пришло в пакете спаривания.
+        buildConfigField("String", "DEFAULT_SIGNALING_URL", "\"wss://signal.pult.local/ws\"")
+
+        // Демо-режим: APK при первом запуске сам подключается по фиксированной демо-паре
+        // (без спаривания), turnkey. Адрес сервера задаётся при сборке через DEMO_SIGNALING_URL.
+        // Ключи шифрования и безопасная установка — следующий этап; для демо это осознанно проще.
+        buildConfigField("boolean", "DEMO_MODE", "${(System.getenv("DEMO_MODE") ?: "false")}")
+        buildConfigField(
+            "String",
+            "DEMO_SIGNALING_URL",
+            "\"${System.getenv("DEMO_SIGNALING_URL") ?: "wss://demo.pult.local/ws"}\"",
+        )
+
+        // Параметры Firebase для ручной инициализации FCM без google-services.json.
+        // Заполняются из окружения при сборке релиза; пустые → FCM не активируется,
+        // приложение работает по онлайн-пути и автозапуску.
+        buildConfigField("String", "FCM_PROJECT_ID", "\"${System.getenv("FCM_PROJECT_ID") ?: ""}\"")
+        buildConfigField("String", "FCM_APP_ID", "\"${System.getenv("FCM_APP_ID") ?: ""}\"")
+        buildConfigField("String", "FCM_API_KEY", "\"${System.getenv("FCM_API_KEY") ?: ""}\"")
+        buildConfigField("String", "FCM_SENDER_ID", "\"${System.getenv("FCM_SENDER_ID") ?: ""}\"")
+    }
+
+    buildFeatures {
+        viewBinding = true
+        buildConfig = true
+    }
+
+    // Разделение V1/V2 из ТЗ (§5а, §9, §11). Ключевое: в V1 НЕТ AccessibilityService —
+    // именно его объявление/включение ссорит приложение с банками (Nordea, Сбер). Поэтому
+    // служба управления и экран сценариев объявляются только во флейворе v2
+    // (src/v2/AndroidManifest.xml), а v1 — банко-безопасная сборка «просмотр + подсказки».
+    flavorDimensions += "edition"
+    productFlavors {
+        create("v1") {
+            dimension = "edition"
+            // Просмотр экрана, указатель, подсказки, белый список. Без accessibility.
+            buildConfigField("boolean", "CONTROL_ENABLED", "false")
+        }
+        create("v2") {
+            dimension = "edition"
+            // Управление устройством и сценарии (§6, §6а). Accessibility — с ограничением
+            // области через packageNames и только на время явной сессии/записи.
+            buildConfigField("boolean", "CONTROL_ENABLED", "true")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            // Эмулятор видит хост как 10.0.2.2. Открытый ws:// допустим только в отладке —
+            // в релизе остаётся wss://, иначе сигналинг можно слушать по дороге.
+            buildConfigField("String", "DEFAULT_SIGNALING_URL", "\"ws://10.0.2.2:8080/ws\"")
+        }
+
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // libwebrtc тянет ~12 МБ нативного кода на каждую ABI. В отладке держим все
+            // (эмуляторы), в релизе — только то, что стоит у реальных людей: иначе APK
+            // для пилота весит 48 МБ, а его ставят по мобильной сети.
+            ndk {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            }
+        }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
+dependencies {
+    implementation(project(":core"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.zxing.core)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
+    testImplementation(libs.junit)
+}

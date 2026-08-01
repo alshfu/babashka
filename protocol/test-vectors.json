@@ -1,0 +1,56 @@
+{
+  "note": "Общие векторы для Kotlin (android/core), Node (server) и Web Crypto (web/public). Расхождение = клиенты не договорятся.",
+  "version": 1,
+  "authContext": "pult/v1/auth",
+  "journalContext": "pult/v1/journal",
+  "pairSecretBase64url": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+  "journalToken": "CLyZdNn3HWHsFf6Pklrae6VxuHsGg3LxPybcY6UhyJ0",
+  "revokeContext": "pult/v1/revoke",
+  "revoke": {
+    "pairId": "pair-REVOKE-0001",
+    "nonce": "cmV2b2tlLW5vbmNlLTAwMDA",
+    "mac": "IoNOVgvWy0QhJ_4sOor9XxD3O86EQT5TCyXxDX7n_HA"
+  },
+  "fingerprintNormalization": [
+    {
+      "algorithm": "SHA-256",
+      "hex": "aa:bb:cc",
+      "expected": "sha-256 AA:BB:CC"
+    },
+    {
+      "algorithm": " sha-256 ",
+      "hex": " Aa:bB:cC ",
+      "expected": "sha-256 AA:BB:CC"
+    }
+  ],
+  "auth": [
+    {
+      "sessionId": "sess-AAAAAAAAAAAAAAAA",
+      "nonceH": "bm9uY2VILTAwMDAwMDAw",
+      "nonceG": "bm9uY2VHLTAwMDAwMDAw",
+      "fpAlgH": "SHA-256",
+      "fpHexH": "aa:bb:cc:dd:ee:ff:00:11",
+      "fpAlgG": "sha-256",
+      "fpHexG": "22:33:44:55:66:77:88:99",
+      "fpH": "sha-256 AA:BB:CC:DD:EE:FF:00:11",
+      "fpG": "sha-256 22:33:44:55:66:77:88:99",
+      "transcript": "pult/v1/auth\nsess-AAAAAAAAAAAAAAAA\nbm9uY2VILTAwMDAwMDAw\nbm9uY2VHLTAwMDAwMDAw\nsha-256 AA:BB:CC:DD:EE:FF:00:11\nsha-256 22:33:44:55:66:77:88:99",
+      "macG": "ZfkzKhzB3uGWXNIJ34un9F2mB_JBTU2kuTothuuR3do",
+      "macH": "b9SqQea1RZiWYPbVe7s_r8C7iyusoB7YviV5xiEpvNw"
+    },
+    {
+      "sessionId": "sess-BBBBBBBBBBBBBBBB",
+      "nonceH": "AAAAAAAAAAAAAAAAAAAAAA",
+      "nonceG": "BBBBBBBBBBBBBBBBBBBBBB",
+      "fpAlgH": "sha-384",
+      "fpHexH": "0a:1b:2c",
+      "fpAlgG": "SHA-384",
+      "fpHexG": "3d:4e:5f",
+      "fpH": "sha-384 0A:1B:2C",
+      "fpG": "sha-384 3D:4E:5F",
+      "transcript": "pult/v1/auth\nsess-BBBBBBBBBBBBBBBB\nAAAAAAAAAAAAAAAAAAAAAA\nBBBBBBBBBBBBBBBBBBBBBB\nsha-384 0A:1B:2C\nsha-384 3D:4E:5F",
+      "macG": "nDvDhPMsH9MdDIaj8e2ZShioPB2jF1CaKDN-s3-cjPY",
+      "macH": "UFtonMAYXm7MxUYwNN3oRO3JQYYY7C2_A_ulYJlrhEY"
+    }
+  ]
+}

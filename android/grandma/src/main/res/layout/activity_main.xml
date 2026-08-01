@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Экран бабушки. Она открывает его редко и НЕ совершает тут действий.
+  Никаких кнопок: настройка и отзыв помощника — забота семьи, а не бабушки
+  (доступ у одного доверенного человека). Всё, что нужно ей, — видеть, что всё хорошо.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp">
+
+    <TextView
+        android:id="@+id/state"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="34sp"
+        android:textStyle="bold"
+        android:textColor="#22C55E"
+        android:text="@string/main_ok" />
+
+    <TextView
+        android:id="@+id/helper"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:textSize="22sp" />
+
+
+    <Button
+        android:id="@+id/scenarios"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="36dp"
+        android:textSize="18sp"
+        android:text="@string/main_scenarios" />
+
+
+    <Button
+        android:id="@+id/vpn"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:textSize="18sp"
+        android:text="@string/main_vpn" />
+
+</LinearLayout>

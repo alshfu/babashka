@@ -1,0 +1,21 @@
+# Сборка
+node_modules/
+android/build/
+android/*/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+
+# Данные и секреты — в репозиторий не попадают никогда
+server/data/
+infra/.env
+*.jks
+*.keystore
+google-services.json
+
+# IDE и ОС
+.idea/workspace.xml
+.idea/shelf/
+.DS_Store
+out/

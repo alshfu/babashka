@@ -1,0 +1,11 @@
+{
+  "name": "pult-panel",
+  "version": "0.1.0",
+  "description": "Веб-панель помощника «Пульта»: статика без сборки, раздаётся сигналинг-сервером",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "license": "UNLICENSED"
+}

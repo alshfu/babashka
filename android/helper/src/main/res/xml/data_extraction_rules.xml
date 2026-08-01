@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Секрет пары не уезжает ни в облачный бэкап, ни в adb backup (docs/security.md §4). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="pult_pair.xml" />
+        <exclude domain="sharedpref" path="pult_pair" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="pult_pair.xml" />
+        <exclude domain="sharedpref" path="pult_pair" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,62 @@
+# Инфраструктура «Пульта»: сигналинг + TURN.
+#
+# Сервер сознательно «глупый»: секретов пары у него нет, содержимое экрана через него
+# не проходит. Компрометация этой машины не даёт доступ к экрану бабушки — максимум
+# отказ в обслуживании и метаданные (docs/security.md §3).
+#
+# Запуск:  cp .env.example .env && $EDITOR .env && docker compose up -d
+
+services:
+  signaling:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${SIGNALING_PORT:-8080}:8080"
+    environment:
+      PORT: 8080
+      TURN_HOST: "${TURN_HOST}"
+      TURN_SECRET: "${TURN_SECRET}"
+      TURN_TTL: "${TURN_TTL:-43200}"
+      STUN_URLS: "${STUN_URLS:-stun:stun.l.google.com:19302}"
+      JOURNAL_PATH: /data/journal.jsonl
+      JOURNAL_RETENTION_DAYS: "${JOURNAL_RETENTION_DAYS:-90}"
+      FCM_KEY: "${FCM_KEY:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    volumes:
+      - journal:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  coturn:
+    image: coturn/coturn:4.6
+    restart: unless-stopped
+    # host-режим обязателен: TURN раздаёт кандидатов с реальными адресами,
+    # за NAT докера они были бы нерабочими.
+    network_mode: host
+    command: >
+      -n
+      --log-file=stdout
+      --listening-port=3478
+      --tls-listening-port=5349
+      --fingerprint
+      --use-auth-secret
+      --static-auth-secret=${TURN_SECRET}
+      --realm=${TURN_REALM:-pult.local}
+      --external-ip=${TURN_EXTERNAL_IP}
+      --min-port=49152
+      --max-port=65535
+      --no-multicast-peers
+      --no-cli
+      --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=169.254.0.0-169.254.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+
+volumes:
+  journal:

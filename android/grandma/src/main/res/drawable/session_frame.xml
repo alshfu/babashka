@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Рамка сессии: заметная, но не мигающая — она висит долго. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <stroke android:width="6dp" android:color="#FF9F43" />
+    <solid android:color="@android:color/transparent" />
+</shape>

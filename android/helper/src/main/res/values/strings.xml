@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Пульт — помощник</string>
+
+    <string name="state_offline">Бабушка не в сети</string>
+    <string name="state_online">Бабушка в сети</string>
+    <string name="state_last_seen">была в сети %1$s</string>
+
+    <string name="ask">Помочь бабушке</string>
+    <string name="ask_note_hint">Зачем помочь? Это увидит бабушка (необязательно)</string>
+    <string name="waiting">Ждём, пока бабушка нажмёт «Разрешить»</string>
+    <string name="cancel">Отменить</string>
+
+    <!-- Формулировки отказа нейтральные: интерфейс не подталкивает давить на бабушку. -->
+    <string name="declined">Бабушка сейчас не может</string>
+    <string name="no_answer">Бабушка не ответила</string>
+    <string name="auth_failed">Не удалось подтвердить пару. Соединение не установлено</string>
+    <string name="too_many">Вы уже отправили несколько запросов. Дайте бабушке время</string>
+
+    <string name="no_pair">Пара не настроена. Настройте помощь при личной встрече</string>
+    <string name="pairing_title">Настроить пару</string>
+    <string name="journal_title">Кто и когда помогал</string>
+
+    <string name="finish">Завершить</string>
+    <string name="say_tap">«Нажмите сюда»</string>
+    <string name="say_scroll">«Прокрутите вниз»</string>
+    <string name="say_ok">«Всё верно»</string>
+    <string name="redacted">Экран скрыт: банковское приложение</string>
+</resources>

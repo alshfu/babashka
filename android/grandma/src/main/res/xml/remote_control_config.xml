@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Служба доступности: удалённое управление + запись/воспроизведение сценариев.
+
+  canPerformGestures — обязательно для dispatchGesture (тапы/свайпы).
+
+  canRetrieveWindowContent="true" нужно, чтобы записывать СМЫСЛ действия («нажали кнопку
+  Позвонить»), а не только координаты, и чтобы при воспроизведении найти этот элемент,
+  даже если он переехал. Без него остаётся лишь слепой тап по точке, который ломается
+  от любого баннера.
+
+  Цена честная: приложение получает доступ к содержимому экрана. Ограничения, которые
+  делают её приемлемой: события обрабатываются ТОЛЬКО во время явно включённой записи
+  (см. RemoteControlService.onAccessibilityEvent), содержимое никуда не сохраняется и
+  не уходит в сеть — в сценарий попадают только идентификатор и подпись нажатого элемента.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeViewClicked|typeViewTextChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagReportViewIds"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="0"
+    android:description="@string/a11y_control_desc" />

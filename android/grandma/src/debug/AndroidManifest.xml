@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Дополнения ТОЛЬКО для отладочной сборки.
+
+  Открытый ws:// и приём пары через adb в релиз не попадают: этот манифест и каталог
+  src/debug/ не участвуют в релизной сборке вообще.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:usesCleartextTraffic="true">
+
+        <receiver
+            android:name="ru.pult.grandma.debug.DebugPairReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ru.pult.grandma.DEBUG_PAIR" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

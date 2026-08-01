@@ -1,0 +1,241 @@
+/* Панель «Пульта». Крупная типографика — стенд бабушки должен читаться так же,
+   как приложение на телефоне: мелкий текст здесь не проверяет ничего полезного. */
+
+:root {
+  color-scheme: dark;
+  --bg: #14161a;
+  --card: #1d2026;
+  --line: #2c313a;
+  --text: #eceff4;
+  --muted: #949aa6;
+  --accent: #ff9f43;
+  --ok: #4cd97b;
+  --danger: #ff5f56;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 3rem;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+
+/* Рамка сессии — тот самый видимый признак подключения (docs/security.md §2). */
+body.in-session::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 6px solid var(--accent);
+  pointer-events: none;
+  animation: pulse 2s ease-in-out infinite;
+  z-index: 40;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.brand { font-weight: 700; letter-spacing: 0.04em; }
+.who { color: var(--muted); }
+.link { margin-left: auto; color: var(--muted); font-size: 0.9rem; }
+.link.ok { color: var(--ok); }
+
+.roles a {
+  color: var(--muted);
+  text-decoration: none;
+  margin-left: 0.75rem;
+  font-size: 0.9rem;
+  border-bottom: 1px solid transparent;
+}
+.roles a.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.card {
+  max-width: 780px;
+  margin: 1.25rem auto;
+  padding: 1.5rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+h1 { font-size: 1.4rem; margin-top: 0; }
+.big-text { font-size: 1.6rem; font-weight: 600; margin: 0.25rem 0 0.75rem; }
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: #2b303a;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 1.1rem;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: #343a46; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+button.big { font-size: 1.15rem; padding: 0.9rem 1.5rem; background: var(--accent); color: #1a1200; border: none; font-weight: 600; }
+
+/* Кнопка согласия — самая большая цель на экране; бабушка должна попасть в неё не глядя. */
+button.huge {
+  display: block;
+  width: 100%;
+  min-height: 28vh;
+  font-size: 2rem;
+  font-weight: 700;
+  background: var(--ok);
+  color: #04220f;
+  border: none;
+  border-radius: 18px;
+  margin-bottom: 0.75rem;
+}
+
+button.quiet { background: transparent; color: var(--muted); }
+button.danger { background: var(--danger); color: #2a0400; border: none; font-weight: 600; }
+button.small { font-size: 0.85rem; padding: 0.35rem 0.7rem; }
+
+input, textarea {
+  font: inherit;
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  margin-bottom: 0.75rem;
+  color: var(--text);
+  background: #14171d;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.presence { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #555c69; }
+.dot.on { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+
+.screen-wrap { position: relative; background: #000; border-radius: 10px; overflow: hidden; }
+video { width: 100%; display: block; background: #000; border-radius: 10px; }
+
+.pointer {
+  position: fixed;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border: 4px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(255, 159, 67, 0.25);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.redacted {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0d0f13;
+  color: var(--muted);
+  font-size: 1.2rem;
+}
+
+.tools { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 1rem; }
+
+/* ── Управление удалённым экраном ─────────────────────────────────────────── */
+
+/* Касания по видео НЕ должны листать страницу: иначе помощник с телефона вместо
+   свайпа у бабушки прокручивает собственную панель. Это и есть та самая жалоба. */
+#remote {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: crosshair;
+}
+body { overscroll-behavior-y: none; }
+
+.keys { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
+.open-link { flex: 1 1 100%; }
+.open-link input { flex: 1; margin: 0; min-width: 12rem; }
+.open-link button { white-space: nowrap; }
+.keys button { padding: 0.55rem 0.85rem; }
+.hint { max-width: 780px; margin: 0.5rem auto; padding: 0 1.25rem; font-size: 0.9rem; }
+
+/* Полноэкранный режим — основной режим работы с телефона.
+   Дублируем нативный :fullscreen своим классом: iOS Safari не умеет
+   requestFullscreen для обычных элементов, только для <video>. */
+#stage.immersive,
+#stage:fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  margin: 0;
+}
+
+#stage.immersive .screen-wrap,
+#stage:fullscreen .screen-wrap {
+  flex: 1;
+  min-height: 0;
+  border-radius: 0;
+}
+
+#stage.immersive video,
+#stage:fullscreen video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+#stage.immersive .tools,
+#stage:fullscreen .tools {
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  gap: 0.3rem;
+  justify-content: center;
+  background: rgba(20, 22, 26, 0.96);
+  border-top: 1px solid var(--line);
+  /* Кнопки не должны уезжать под системную панель жестов телефона. */
+  padding-bottom: max(0.45rem, env(safe-area-inset-bottom));
+}
+
+#stage.immersive .tools button,
+#stage:fullscreen .tools button {
+  padding: 0.5rem 0.7rem;
+  font-size: 0.95rem;
+}
+
+/* В полноэкранном режиме подсказки-фразы только мешают — прячем. */
+#stage.immersive [data-say],
+#stage:fullscreen [data-say] { display: none; }
+
+.consent { border-color: var(--accent); }
+
+.log-card { max-width: 780px; }
+.log { list-style: none; margin: 0.5rem 0 1rem; padding: 0; max-height: 220px; overflow-y: auto; font-size: 0.9rem; }
+.log li { padding: 0.2rem 0; border-bottom: 1px solid #22262e; color: var(--muted); }
+.log li.warn { color: var(--accent); }
+.log li.error { color: var(--danger); }
+
+@media (max-width: 620px) {
+  .card { margin: 0.75rem; padding: 1.1rem; }
+  button.huge { min-height: 34vh; font-size: 1.7rem; }
+  /* С телефона панель — это прежде всего пульт: кнопки крупные, подписи короткие. */
+  .keys button { padding: 0.6rem 0.75rem; }
+  .tools { gap: 0.4rem; }
+}

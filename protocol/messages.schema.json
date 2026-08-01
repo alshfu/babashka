@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pult.local/protocol/messages.schema.json",
+  "title": "Сообщения «Пульта» v1",
+  "description": "Сигналинг (WebSocket) и управляющий канал WebRTC. Текстовое описание — docs/protocol.md. Секрет пары не встречается ни в одном сообщении и появиться здесь не может.",
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9_-]+$" },
+    "role": { "enum": ["grandma", "helper"] },
+    "mac": { "type": "string", "minLength": 43, "maxLength": 44, "pattern": "^[A-Za-z0-9_-]+$" },
+    "nonce": { "type": "string", "minLength": 22, "maxLength": 24, "pattern": "^[A-Za-z0-9_-]+$" },
+    "sdp": { "type": "string", "maxLength": 32768 },
+    "endReason": {
+      "enum": [
+        "stopped-by-grandma", "stopped-by-helper", "declined", "no-answer",
+        "cancelled", "auth-failed", "peer-lost", "timeout", "error"
+      ]
+    },
+    "errorCode": {
+      "enum": [
+        "bad-message", "not-authenticated", "unknown-session", "peer-offline",
+        "replaced", "rate-limited", "too-many-requests", "unsupported-version",
+        "wrong-role", "wrong-state"
+      ]
+    }
+  },
+
+  "signaling": {
+    "clientToServer": {
+      "hello": {
+        "required": ["t", "v", "pairId", "role", "deviceId"],
+        "properties": {
+          "t": { "const": "hello" },
+          "v": { "const": 1 },
+          "pairId": { "$ref": "#/$defs/id" },
+          "role": { "$ref": "#/$defs/role" },
+          "deviceId": { "$ref": "#/$defs/id" },
+          "journalTokenHash": {
+            "$ref": "#/$defs/id",
+            "description": "SHA-256(journalToken) в base64url. Регистрируется один раз, при первом hello пары."
+          }
+        }
+      },
+      "register-push": {
+        "required": ["t", "token"],
+        "description": "Только от роли grandma: токен FCM для пробуждения спящего телефона.",
+        "properties": { "t": { "const": "register-push" }, "token": { "type": "string", "maxLength": 512 } }
+      },
+      "help-request": {
+        "required": ["t"],
+        "description": "Только от роли helper. Сам по себе доступа не даёт — это вопрос, а не команда.",
+        "properties": {
+          "t": { "const": "help-request" },
+          "note": { "type": "string", "maxLength": 60 }
+        }
+      },
+      "consent-granted": {
+        "required": ["t", "sessionId"],
+        "description": "Только от роли grandma. Нажатие «Разрешить» на её телефоне.",
+        "properties": { "t": { "const": "consent-granted" }, "sessionId": { "$ref": "#/$defs/id" } }
+      },
+      "consent-denied": {
+        "required": ["t", "sessionId"],
+        "properties": {
+          "t": { "const": "consent-denied" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "reason": { "const": "declined" }
+        }
+      },
+      "offer": {
+        "required": ["t", "sessionId", "sdp", "nonceH"],
+        "description": "Только от роли helper и только после согласия.",
+        "properties": {
+          "t": { "const": "offer" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "sdp": { "$ref": "#/$defs/sdp" },
+          "nonceH": { "$ref": "#/$defs/nonce" }
+        }
+      },
+      "answer": {
+        "required": ["t", "sessionId", "sdp", "nonceG", "macG"],
+        "properties": {
+          "t": { "const": "answer" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "sdp": { "$ref": "#/$defs/sdp" },
+          "nonceG": { "$ref": "#/$defs/nonce" },
+          "macG": { "$ref": "#/$defs/mac" }
+        }
+      },
+      "auth-confirm": {
+        "required": ["t", "sessionId", "macH"],
+        "properties": {
+          "t": { "const": "auth-confirm" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "macH": { "$ref": "#/$defs/mac" }
+        }
+      },
+      "ice": {
+        "required": ["t", "sessionId"],
+        "properties": {
+          "t": { "const": "ice" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "candidate": {
+            "type": ["object", "null"],
+            "properties": {
+              "candidate": { "type": "string", "maxLength": 1024 },
+              "sdpMid": { "type": ["string", "null"] },
+              "sdpMLineIndex": { "type": ["integer", "null"] }
+            }
+          }
+        }
+      },
+      "session-end": {
+        "required": ["t", "sessionId"],
+        "properties": {
+          "t": { "const": "session-end" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "reason": { "$ref": "#/$defs/endReason" }
+        }
+      },
+      "ping": { "required": ["t"], "properties": { "t": { "const": "ping" } } }
+    },
+
+    "serverToClient": {
+      "hello-ok": {
+        "required": ["t", "serverTime", "peerOnline", "iceServers"],
+        "properties": {
+          "t": { "const": "hello-ok" },
+          "serverTime": { "type": "integer" },
+          "peerOnline": { "type": "boolean" },
+          "iceServers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["urls"],
+              "properties": {
+                "urls": { "type": "array", "items": { "type": "string" } },
+                "username": { "type": "string" },
+                "credential": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "peer-state": {
+        "required": ["t", "online"],
+        "properties": { "t": { "const": "peer-state" }, "online": { "type": "boolean" } }
+      },
+      "help-request-sent": {
+        "required": ["t", "sessionId", "peerOnline"],
+        "description": "Подтверждение помощнику: sessionId и онлайн ли телефон бабушки.",
+        "properties": {
+          "t": { "const": "help-request-sent" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "peerOnline": { "type": "boolean" }
+        }
+      },
+      "help-request": {
+        "required": ["t", "sessionId", "from", "at"],
+        "properties": {
+          "t": { "const": "help-request" },
+          "sessionId": { "$ref": "#/$defs/id" },
+          "from": { "const": "helper" },
+          "at": { "type": "integer" },
+          "note": { "type": "string", "maxLength": 60 }
+        }
+      },
+      "error": {
+        "required": ["t", "code"],
+        "properties": {
+          "t": { "const": "error" },
+          "code": { "$ref": "#/$defs/errorCode" },
+          "message": { "type": "string", "maxLength": 200 }
+        }
+      },
+      "pong": { "required": ["t"], "properties": { "t": { "const": "pong" } } }
+    }
+  },
+
+  "controlChannel": {
+    "description": "Канал WebRTC `pult-control`. Сервер этих сообщений не видит вообще.",
+    "screen-state": {
+      "required": ["t", "on"],
+      "description": "Бабушка → внук: показ начался/закончился.",
+      "properties": {
+        "t": { "const": "screen-state" },
+        "on": { "type": "boolean" },
+        "w": { "type": "integer" },
+        "h": { "type": "integer" }
+      }
+    },
+    "pointer": {
+      "required": ["t", "x", "y"],
+      "description": "Внук → бабушка: координаты в долях экрана (0..1), не в пикселях.",
+      "properties": {
+        "t": { "const": "pointer" },
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "kind": { "enum": ["tap", "circle"] }
+      }
+    },
+    "pointer-clear": { "required": ["t"], "properties": { "t": { "const": "pointer-clear" } } },
+    "say": {
+      "required": ["t", "text"],
+      "properties": { "t": { "const": "say" }, "text": { "type": "string", "maxLength": 60 } }
+    },
+    "redact": {
+      "required": ["t", "on"],
+      "description": "Бабушка → внук: экран погашен. Решение принимает её устройство; помощник отключить не может.",
+      "properties": {
+        "t": { "const": "redact" },
+        "on": { "type": "boolean" },
+        "reason": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "stop": { "required": ["t"], "properties": { "t": { "const": "stop" } } }
+  }
+}

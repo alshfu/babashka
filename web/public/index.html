@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pult — assistant panel</title>
+  <link rel="stylesheet" href="/panel/style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">Pult</div>
+    <div class="who" id="who">assistant panel</div>
+    <div class="link" id="link" title="signaling connection">offline</div>
+    <nav class="roles">
+      <a href="/panel/?role=helper" id="tab-helper">assistant</a>
+      <a href="/panel/?role=grandma" id="tab-grandma">elder (test stand)</a>
+    </nav>
+  </header>
+
+  <!-- ── Pairing ────────────────────────────────────────────────────────── -->
+  <section id="pairing" class="card hidden">
+    <h1>No pair configured</h1>
+    <p class="muted">
+      In the real product a pair is created only in person: by NFC or a QR code on the screen.
+      A link carrying the secret must never be forwarded — that is exactly the attack the product
+      guards against. Below is a test stand for exercising the protocol on a single machine.
+    </p>
+
+    <div data-role="grandma">
+      <button id="create-pair" class="big">Create pair (test stand)</button>
+      <div id="pair-packet" class="hidden">
+        <p>Open this link in a second tab — it becomes the assistant panel:</p>
+        <input id="pair-link" readonly>
+        <button id="copy-link">Copy</button>
+      </div>
+    </div>
+
+    <div data-role="helper">
+      <p>Paste the pairing packet (in the app it arrives by NFC or from a QR code):</p>
+      <textarea id="packet-input" rows="3" placeholder="eyJ2IjoxL…"></textarea>
+      <button id="adopt-packet" class="big">Accept pair</button>
+    </div>
+  </section>
+
+  <!-- ── Assistant panel ────────────────────────────────────────────────── -->
+  <main id="helper" class="hidden">
+    <section class="card">
+      <div class="presence">
+        <span class="dot" id="presence-dot"></span>
+        <span id="presence-text">elder is offline</span>
+      </div>
+
+      <div id="helper-idle">
+        <input id="note" maxlength="60" placeholder="What is this about? (optional, the elder will see it)">
+        <button id="ask" class="big" disabled>Assist</button>
+      </div>
+
+      <div id="helper-waiting" class="hidden">
+        <p class="big-text">Waiting for the elder to tap “Allow”</p>
+        <p class="muted" id="countdown">90</p>
+        <button id="cancel">Cancel</button>
+      </div>
+
+      <p id="helper-message" class="muted"></p>
+    </section>
+
+    <section class="card" id="admin-card">
+      <details>
+        <summary>Configure the elder’s phone</summary>
+        <p class="muted">
+          The pair is created here, on the assistant’s side, and transferred to the elder’s phone
+          in person (in production via Device Owner provisioning; for debugging, the command below).
+          The secret never leaves for the network.
+        </p>
+        <button id="provision" class="big">Create a pair for the elder</button>
+        <div id="provision-out" class="hidden">
+          <p>Debug command — run on the connected phone:</p>
+          <textarea id="provision-cmd" rows="3" readonly></textarea>
+          <button id="copy-cmd">Copy</button>
+        </div>
+
+        <hr>
+
+        <p class="muted">
+          Revoke access: the elder’s phone verifies the signature and erases the pair secret.
+          After that no one can connect until you set it up again in person.
+        </p>
+        <button id="revoke" class="danger">Revoke access</button>
+        <p id="revoke-status" class="muted"></p>
+      </details>
+    </section>
+
+    <section class="card hidden" id="screen-card">
+      <div id="stage">
+        <div class="screen-wrap">
+          <video id="remote" autoplay playsinline></video>
+          <div id="pointer" class="pointer hidden"></div>
+          <div id="redacted" class="redacted hidden">Screen hidden: banking app</div>
+        </div>
+
+        <div class="tools" id="controls">
+          <!-- Navigation -->
+          <div class="keys">
+            <button id="nav-back" title="Back">◁</button>
+            <button id="nav-home" title="Home">○</button>
+            <button id="nav-recents" title="Recent apps">▢</button>
+          </div>
+
+          <!-- Volume -->
+          <div class="keys">
+            <button data-sys="volume-down" title="Volume down">🔉 −</button>
+            <button data-sys="volume-up" title="Volume up">🔊 +</button>
+            <button data-sys="volume-mute" title="Mute">🔇</button>
+          </div>
+
+          <!-- Brightness -->
+          <div class="keys">
+            <button data-sys="brightness-down" title="Brightness down">☀ −</button>
+            <button data-sys="brightness-up" title="Brightness up">☀ +</button>
+          </div>
+
+          <!-- System panels -->
+          <div class="keys">
+            <button data-sys="notifications" title="Notification shade">Shade</button>
+            <button data-sys="quick-settings" title="Quick settings">Quick</button>
+            <button data-sys="lock" title="Lock screen">Lock</button>
+          </div>
+
+          <!-- Element-by-element navigation (more robust than pixel taps) -->
+          <div class="keys">
+            <button id="focus-prev" title="Previous element">◀ Prev</button>
+            <button id="focus-activate" title="Activate selected">● Select</button>
+            <button id="focus-next" title="Next element">Next ▶</button>
+          </div>
+
+          <!-- Remote toggle of the control (accessibility) service on the elder's phone -->
+          <div class="keys">
+            <button id="control-toggle" title="Enable/disable control service">Control: —</button>
+          </div>
+
+          <!-- Open a link directly on the elder's phone: Photos album, YouTube, WhatsApp chat… -->
+          <div class="keys open-link">
+            <input id="open-url" type="url" placeholder="Paste a link — Photos, YouTube, WhatsApp…">
+            <button id="open-go">Open on phone</button>
+          </div>
+
+          <button id="fullscreen" title="Full screen">⛶ Full screen</button>
+
+          <div class="keys">
+            <button data-say="Tap here">“Tap here”</button>
+            <button data-say="Scroll down">“Scroll down”</button>
+            <button data-say="That’s correct">“That’s correct”</button>
+          </div>
+
+          <button id="finish" class="danger">Finish</button>
+        </div>
+      </div>
+      <p class="muted hint">Tap the screen to tap for the elder · drag to scroll</p>
+    </section>
+  </main>
+
+  <!-- ── Elder test stand ───────────────────────────────────────────────── -->
+  <main id="grandma" class="hidden">
+    <section class="card" id="grandma-idle">
+      <p class="big-text">Everything is working</p>
+      <p class="muted">Assistant: <b id="helper-name">—</b>. The app is waiting for a request and transmits nothing.</p>
+    </section>
+
+    <section class="card consent hidden" id="consent">
+      <p class="big-text" id="consent-title">Alex would like to help</p>
+      <p class="muted" id="consent-note"></p>
+      <button id="allow" class="huge">Allow</button>
+      <button id="deny" class="quiet">Not now</button>
+    </section>
+
+    <section class="card hidden" id="grandma-session">
+      <p class="big-text" id="session-title">Alex is assisting you</p>
+      <video id="local" autoplay playsinline muted></video>
+      <div id="local-pointer" class="pointer hidden"></div>
+      <p class="muted" id="said"></p>
+      <div class="tools">
+        <button id="redact" class="quiet">Open “banking app”</button>
+        <button id="stop" class="danger big">Stop</button>
+      </div>
+    </section>
+  </main>
+
+  <section class="card log-card">
+    <details open>
+      <summary>What’s happening</summary>
+      <ul id="log" class="log"></ul>
+    </details>
+    <button id="forget" class="quiet small">Forget the pair on this device</button>
+  </section>
+
+  <script type="module" src="/panel/app.js"></script>
+</body>
+</html>

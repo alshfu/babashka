@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Svenska. Artig, värdig ton. -->
+<resources>
+    <string name="app_name">Pult</string>
+
+    <string name="notif_status_title">Pult — familjens hjälp är ansluten</string>
+    <string name="notif_status_connected">%1$s finns till hands</string>
+    <string name="notif_status_text">Din skärm är privat</string>
+    <string name="notif_offline">Ej ansluten — hjälp är inte tillgänglig</string>
+    <string name="notif_session_title">%1$s ser din skärm</string>
+    <string name="notif_session_text">Tryck på Stopp för att avsluta</string>
+    <string name="notif_stop">Stopp</string>
+
+    <string name="consent_title">%1$s vill hjälpa till</string>
+    <string name="consent_allow">Tillåt</string>
+    <string name="consent_deny">Inte nu</string>
+    <string name="consent_auto">%1$s ansluter…</string>
+
+    <string name="session_banner">%1$s hjälper dig</string>
+    <string name="session_stop">Stopp</string>
+    <string name="session_redacted">Skärmen dold: bankapp</string>
+
+    <string name="main_ok">Allt fungerar</string>
+    <string name="main_helper">Din assistent: %1$s</string>
+    <string name="main_no_pair">Ingen assistent konfigurerad ännu</string>
+    <string name="main_forget">Ta bort assistent</string>
+    <string name="main_journal">Hjälphistorik</string>
+
+    <string name="setup_title">Konfigurera assistent</string>
+    <string name="setup_qr_hint">Visa denna kod för barnbarnet som står bredvid. Skicka den aldrig som ett foto.</string>
+
+    <string name="setup_intro_title">Några behörigheter krävs</string>
+    <string name="setup_intro_text">Utan dem kan hjälpen inte fungera när telefonen är låst. Det tar en eller två minuter. Den som hjälper utför konfigurationen — den äldre behöver inte göra något.</string>
+    <string name="setup_intro_start">Börja konfigurera</string>
+    <string name="setup_skip_warn">Om du hoppar över detta kan hjälpen bli opålitlig: telefonen kan stänga appen inom 10–30 minuter. Hoppa över ändå?</string>
+    <string name="setup_skip_back">Tillbaka</string>
+    <string name="setup_skip_anyway">Hoppa över ändå</string>
+    <string name="setup_step_progress">Steg %1$d av %2$d</string>
+    <string name="setup_open">Öppna inställningar</string>
+    <string name="setup_done">Klar, fortsätt</string>
+    <string name="setup_skip">Hoppa över detta steg</string>
+    <string name="setup_granted">✓ Beviljad</string>
+    <string name="setup_not_granted">Inte beviljad ännu — tryck på ”Öppna inställningar”</string>
+    <string name="setup_finished_title">Allt klart</string>
+    <string name="setup_finished_text">Telefonen är redo att ta emot hjälp. Inget mer krävs av den äldre.</string>
+    <string name="setup_check">Kontrollera att allt fungerar</string>
+
+    <string name="a11y_control_desc">Låter din assistent trycka och navigera i telefonen under en hjälpsession, så att de kan göra det åt dig. Aktiv endast medan hjälpen pågår.</string>
+    <string name="scenarios_title">Scenarier</string>
+    <string name="main_scenarios">Scenarier</string>
+    <string name="vpn_title">Appåtkomst</string>
+    <string name="main_vpn">Appåtkomst</string>
+</resources>
