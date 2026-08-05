@@ -135,6 +135,18 @@ export class Hub {
       if (conn.role === 'grandma') this.#push?.register(conn.pairId, message.token);
       return;
     }
+    if (message.t === 'deeplink-status') {
+      // Статус подписания BankID с телефона бабушки — уходит в /link-канал
+      // (Flutter-приложение шлюза), а не в WebRTC-сессию: сессии здесь может не быть.
+      if (conn.role === 'grandma') {
+        this.onDeeplinkStatus?.(conn.pairId, {
+          ok: message.ok === true,
+          stage: typeof message.stage === 'string' ? message.stage.slice(0, 32) : '',
+          err: typeof message.err === 'string' ? message.err.slice(0, 128) : '',
+        });
+      }
+      return;
+    }
 
     this.#route(conn, message);
   }
@@ -368,6 +380,24 @@ export class Hub {
   }
 
   // ── Служебное ─────────────────────────────────────────────────────────────
+
+  /**
+   * Колбэк для /link-канала (шлюз BankID-диплинков): назначается из index.js.
+   * Вызывается со статусом подписания от телефона бабушки.
+   */
+  onDeeplinkStatus = null;
+
+  /**
+   * Доставить сообщение телефону бабушки вне сессии (канал /link: диплинк BankID).
+   * false — бабушка офлайн; вызывающий решает, что ответить приложению.
+   */
+  sendToGrandma(pairId, payload) {
+    const grandma = this.#pairs.get(pairId)?.sockets.get('grandma');
+    if (!grandma) return false;
+    grandma.send(payload);
+    log.info('to grandma', { pairId, type: payload.t });
+    return true;
+  }
 
   iceServers(pairId) {
     const servers = [{ urls: this.#config.stunUrls }];

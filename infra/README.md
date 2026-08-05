@@ -11,6 +11,16 @@ docker compose up -d
 curl -s localhost:8080/healthz
 ```
 
+## Канал «VPS ⇄ агент» (BankID-вход без USB)
+
+Кнопка панели «Войти в Swedbank через VPS-агент» ходит: панель →
+`POST /api/agent-command` → WSS `/agent` → `scripts/vps-agent-bridge.mjs` на Mac →
+`scripts/scrcpy-lan.mjs` (TCP 47203) → телефон по домашнему WiFi. USB не участвует.
+
+- На VPS: задать `AGENT_TOKEN` в `.env`, пересобрать `docker compose up -d --build signaling`.
+- На Mac: `node scripts/vps-agent-bridge.mjs wss://<панель> <pairId> <AGENT_TOKEN>` (держать в фоне,
+  реконнектится сам) + работающий `node scripts/scrcpy-lan.mjs`.
+
 ## Порты
 
 | Порт | Кто | Зачем |

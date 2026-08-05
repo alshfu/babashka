@@ -17,5 +17,13 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name="ru.pult.grandma.debug.DebugDumpReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ru.pult.grandma.DEBUG_DUMP" />
+            </intent-filter>
+        </receiver>
+
     </application>
 </manifest>

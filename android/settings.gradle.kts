@@ -17,6 +17,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // libadb-android (свой ADB-клиент с TLS-парингом) публикуется через JitPack.
+        maven("https://jitpack.io")
     }
 }
 

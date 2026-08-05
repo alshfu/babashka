@@ -27,7 +27,7 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
-export function createRequestHandler({ config, hub, journal, startedAt }) {
+export function createRequestHandler({ config, hub, journal, startedAt, agentChannel = null }) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -48,11 +48,22 @@ export function createRequestHandler({ config, hub, journal, startedAt }) {
         return json(res, 200, { iceServers: hub.iceServers(pairId) });
       }
 
+      if (path === '/api/agent-command' && req.method === 'POST') {
+        return await agentCommandEndpoint(req, res, config, agentChannel);
+      }
+
       if (path === '/api/journal') {
         return journalEndpoint(req, res, url, journal);
       }
 
       if (config.servePanel && (path === '/' || path.startsWith('/panel'))) {
+        // Демо-стенд: голый адрес (без query) — сразу в панель помощника,
+        // чтобы ссылка работала даже обрезанной мессенджером/браузером.
+        // Ссылки с параметрами (role, demo, pairing-пакет) идут как шли.
+        if ((path === '/' || path === '/panel' || path === '/panel/') && !url.search) {
+          res.writeHead(302, { location: '/panel/?role=helper&demo=1' });
+          return res.end();
+        }
         return await servePanel(res, path);
       }
 
@@ -62,6 +73,50 @@ export function createRequestHandler({ config, hub, journal, startedAt }) {
       return json(res, 500, { error: 'внутренняя ошибка' });
     }
   };
+}
+
+/**
+ * Команда агенту пары (BankID-вход и прочие действия LAN-стека на Mac).
+ * Авторизация — тем же AGENT_TOKEN, что и у самого агента на /agent (заголовок
+ * x-agent-token). Тело: {"pairId": "...", "cmd": {...}}. Ответ — JSON агента как есть.
+ */
+async function agentCommandEndpoint(req, res, config, agentChannel) {
+  const token = req.headers['x-agent-token'];
+  if (!config.agentToken || token !== config.agentToken) {
+    return json(res, 403, { ok: false, error: 'нет доступа к агенту' });
+  }
+  if (!agentChannel) return json(res, 503, { ok: false, error: 'канал агента отключён' });
+
+  const body = await readJsonBody(req);
+  if (!body || typeof body !== 'object') return json(res, 400, { ok: false, error: 'плохой JSON' });
+  const { pairId, cmd } = body;
+  if (!pairId || !cmd || typeof cmd !== 'object') {
+    return json(res, 400, { ok: false, error: 'нужны pairId и cmd' });
+  }
+  try {
+    const result = await agentChannel.sendCommand(pairId, cmd);
+    return json(res, 200, { ok: true, res: result });
+  } catch (error) {
+    const offline = error.message === 'agent offline';
+    return json(res, offline ? 503 : 504, { ok: false, error: error.message });
+  }
+}
+
+function readJsonBody(req, limit = 64 * 1024) {
+  return new Promise((resolveBody) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) { req.destroy(); resolveBody(null); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try { resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch { resolveBody(null); }
+    });
+    req.on('error', () => resolveBody(null));
+  });
 }
 
 /**

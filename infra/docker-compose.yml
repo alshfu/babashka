@@ -24,6 +24,7 @@ services:
       JOURNAL_RETENTION_DAYS: "${JOURNAL_RETENTION_DAYS:-90}"
       FCM_KEY: "${FCM_KEY:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
+      AGENT_TOKEN: "${AGENT_TOKEN:-}"
     volumes:
       - journal:/data
     healthcheck:

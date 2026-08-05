@@ -4,8 +4,11 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import ru.pult.grandma.BuildConfig
 
 /**
  * Удалённое управление телефоном бабушки во время сессии.
@@ -24,6 +27,7 @@ class RemoteControlService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        android.util.Log.i("PultControl", "onServiceConnected: instance set")
         // Размеры экрана нужны записи для перевода границ элемента в доли экрана.
         recorder.screenSize = displaySize()
         // §177 ТЗ: область службы ограничена — по умолчанию видим только приложения,
@@ -72,6 +76,34 @@ class RemoteControlService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Вне записи события просто выбрасываются: ничего не копим и никуда не шлём.
         if (event != null && recorder.isRecording) recorder.onEvent(event)
+
+        // Отладочный автоклик системного диалога захвата экрана.
+        // На Android 15+ appops PROJECT_MEDIA allow не всегда подавляет системное окно
+        // (особенно на первом запуске), поэтому на этапе разработки кликаем за бабушку.
+        if (BuildConfig.DEBUG && event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val className = event.className?.toString().orEmpty()
+            if (className.contains("MediaProjectionPermissionActivity")) {
+                Handler(Looper.getMainLooper()).postDelayed({ autoConfirmCaptureDialog() }, 300)
+            }
+        }
+    }
+
+    /** Находит в системном диалоге захвата кнопку подтверждения и нажимает её. */
+    private fun autoConfirmCaptureDialog() {
+        val root = rootInActiveWindow ?: return
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        collectClickable(root, candidates)
+        // Предпочитаем узел с типичным текстом кнопки "Start now" / "Начать".
+        val texts = listOf("start now", "begin", "начать", "пуск", "允许", "許可", "start")
+        val byText = candidates.find { node ->
+            val t = node.text?.toString().orEmpty().lowercase()
+            texts.any { t.contains(it) }
+        }
+        val target = byText ?: candidates.lastOrNull()
+        if (target != null) {
+            android.util.Log.i("PultControl", "auto-confirming media projection dialog")
+            clickUpTree(target)
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -256,5 +288,136 @@ class RemoteControlService : AccessibilityService() {
             private set
 
         fun isEnabled(): Boolean = instance != null
+
+        /** Дерево доступности как JSON — для стриминга в панель при записи сценариев. */
+        fun dumpTreeJson(): String? {
+            val service = instance ?: return null
+            val sb = StringBuilder()
+            sb.append("[")
+            var first = true
+            fun esc(s: String) = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+            fun walk(node: AccessibilityNodeInfo, depth: Int) {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                val text = node.text?.toString().orEmpty()
+                val desc = node.contentDescription?.toString().orEmpty()
+                val id = node.viewIdResourceName.orEmpty()
+                val cls = node.className?.toString()?.substringAfterLast('.').orEmpty()
+                if (node.isVisibleToUser && (text.isNotBlank() || desc.isNotBlank() || id.isNotBlank() || node.isClickable)) {
+                    if (!first) sb.append(",")
+                    first = false
+                    sb.append("{")
+                    sb.append("\"cls\":\"${esc(cls)}\",")
+                    sb.append("\"text\":\"${esc(text)}\",")
+                    sb.append("\"desc\":\"${esc(desc)}\",")
+                    sb.append("\"id\":\"${esc(id.substringAfterLast('/'))}\",")
+                    sb.append("\"bounds\":[${rect.left},${rect.top},${rect.right},${rect.bottom}],")
+                    sb.append("\"clickable\":${node.isClickable}")
+                    sb.append("}")
+                }
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { walk(it, depth + 1) }
+                }
+            }
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            runCatching { service.rootInActiveWindow?.let { roots.add(it) } }
+            // Диалоги поверх активности — отдельные окна: обходим ВСЕ, иначе, например,
+            // код/порт из системного диалога спаривания в дамп не попадают.
+            runCatching {
+                service.windows?.forEach { win ->
+                    win?.root?.let { root ->
+                        if (roots.none { it == root }) roots.add(root)
+                    }
+                }
+            }
+            for (root in roots) runCatching { walk(root, 0) }
+            sb.append("]")
+            return sb.toString()
+        }
+
+        /**
+         * Скролл списка ДЕЙСТВИЕМ доступности (ACTION_SCROLL_FORWARD/BACKWARD), а не жестом:
+         * на MIUI dispatchGesture по спискам настроек прокручивает плохо или непрокручивает.
+         */
+        fun scrollList(forward: Boolean): Boolean {
+            val service = instance ?: return false
+            val action = if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+            else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            fun findScrollable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+                if (node.actionList.any { it.id == action }) return node
+                for (i in 0 until node.childCount) {
+                    val found = node.getChild(i)?.let { findScrollable(it) }
+                    if (found != null) return found
+                }
+                return null
+            }
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            runCatching { service.rootInActiveWindow?.let { roots.add(it) } }
+            runCatching {
+                service.windows?.forEach { win ->
+                    win?.root?.let { root ->
+                        if (roots.none { it == root }) roots.add(root)
+                    }
+                }
+            }
+            for (root in roots) {
+                val scrollable = findScrollable(root)
+                if (scrollable != null && scrollable.performAction(action)) return true
+            }
+            return false
+        }
+
+        /**
+         * Дамп дерева доступности в файл — ТОЛЬКО для отладки на устройстве владельца.
+         * Нужен, чтобы снять экраны защищённых приложений (BankID) для сценариев:
+         * uiautomator их не видит, а служба видит всё дерево.
+         */
+        fun dumpTree(outputPath: String): Boolean {
+            val service = instance ?: run {
+                android.util.Log.w("PultControl", "dumpTree: instance is null")
+                return false
+            }
+            val sb = StringBuilder()
+            fun walk(node: AccessibilityNodeInfo, depth: Int) {
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                val text = node.text?.toString().orEmpty()
+                val desc = node.contentDescription?.toString().orEmpty()
+                val id = node.viewIdResourceName.orEmpty()
+                val cls = node.className?.toString()?.substringAfterLast('.').orEmpty()
+                if (text.isNotBlank() || desc.isNotBlank() || id.isNotBlank() || node.isClickable) {
+                    sb.append("  ".repeat(depth))
+                    sb.append("$cls text='$text' desc='$desc' id='${id.substringAfterLast('/')}' ")
+                    sb.append("bounds=[$rect] clickable=${node.isClickable}\n")
+                }
+                for (i in 0 until node.childCount) {
+                    node.getChild(i)?.let { walk(it, depth + 1) }
+                }
+            }
+            // На MIUI rootInActiveWindow часто null даже при живом окне. Берём все окна
+            // через getWindows() и выбираем активное или приложение с наибольшим деревом.
+            val roots = mutableListOf<AccessibilityNodeInfo>()
+            runCatching { service.rootInActiveWindow?.let { roots.add(it) } }
+            if (roots.isEmpty()) {
+                runCatching {
+                    service.windows?.forEach { win ->
+                        win?.root?.let { roots.add(it) }
+                    }
+                }
+            }
+            if (roots.isEmpty()) {
+                android.util.Log.w("PultControl", "dumpTree: no accessible windows")
+                return false
+            }
+            android.util.Log.i("PultControl", "dumpTree: ${roots.size} window(s)")
+            for (root in roots) {
+                runCatching { walk(root, 0) }
+                sb.append("\n---\n")
+            }
+            return runCatching {
+                java.io.File(outputPath).writeText(sb.toString())
+                true
+            }.getOrDefault(false)
+        }
     }
 }

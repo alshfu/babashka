@@ -25,7 +25,7 @@ class PendingScreenTransport : ScreenTransport {
 
     override fun releaseCapture() = Unit
 
-    override suspend fun setRedacted(on: Boolean, reason: String) = notReady()
+    override suspend fun setRedacted(on: Boolean, reason: String, packageName: String?) = notReady()
 
     override fun sendControl(payload: String) = notReady()
 

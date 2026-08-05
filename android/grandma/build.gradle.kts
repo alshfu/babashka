@@ -25,11 +25,27 @@ android {
         // Демо-режим: APK при первом запуске сам подключается по фиксированной демо-паре
         // (без спаривания), turnkey. Адрес сервера задаётся при сборке через DEMO_SIGNALING_URL.
         // Ключи шифрования и безопасная установка — следующий этап; для демо это осознанно проще.
+        // Источник подписанного конфига (адреса/ключи). Пусто → автоподхват выключен.
+        // Принимается только подписанный запиненным ключом манифест (см. ConfigRefresher).
+        buildConfigField(
+            "String",
+            "CONFIG_SOURCE_URL",
+            "\"${System.getenv("CONFIG_SOURCE_URL") ?: ""}\"",
+        )
+
         buildConfigField("boolean", "DEMO_MODE", "${(System.getenv("DEMO_MODE") ?: "false")}")
         buildConfigField(
             "String",
             "DEMO_SIGNALING_URL",
             "\"${System.getenv("DEMO_SIGNALING_URL") ?: "wss://demo.pult.local/ws"}\"",
+        )
+
+        // Токен каналов /link и /tunnel (AGENT_TOKEN на сервере). Только для личной
+        // демо-сборки: токен внутри APK извлекаем, боевой путь — выдача при спаривании.
+        buildConfigField(
+            "String",
+            "TUNNEL_TOKEN",
+            "\"${System.getenv("TUNNEL_TOKEN") ?: ""}\"",
         )
 
         // Параметры Firebase для ручной инициализации FCM без google-services.json.
@@ -113,6 +129,12 @@ dependencies {
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+
+    // Свой ADB-клиент (TLS-паринг wireless debugging + shell-exec как UID 2000) —
+    // автономный shell-уровень без Shizuku и без постоянного LanAgent-процесса.
+    implementation("com.github.MuntashirAkon:libadb-android:3.1.1")
+    implementation("org.conscrypt:conscrypt-android:2.5.3")
+    implementation("com.github.MuntashirAkon:sun-security-android:1.1")
 
     testImplementation(libs.junit)
 }

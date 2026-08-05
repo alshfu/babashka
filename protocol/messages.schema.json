@@ -213,5 +213,32 @@
       }
     },
     "stop": { "required": ["t"], "properties": { "t": { "const": "stop" } } }
+  },
+
+  "linkChannel": {
+    "description": "Канал /link (шлюз BankID-диплинков): Flutter-приложение ⇄ сервер, аутентификация токеном (AGENT_TOKEN). Диплинк сервер ретранслирует телефону бабушки по сигналингу; статус возвращается тем же путём. WebRTC-сессия не нужна.",
+    "deeplink": {
+      "required": ["t", "url"],
+      "description": "Приложение → телефон бабушки: открыть BankID-диплинк. Сервер принимает только префикс bankid:///, до 512 символов.",
+      "properties": {
+        "t": { "const": "deeplink" },
+        "url": { "type": "string", "maxLength": 512, "pattern": "^bankid:///" }
+      }
+    },
+    "deeplink-ack": {
+      "required": ["t", "delivered"],
+      "description": "Сервер → приложение: квитанция маршрутизации (delivered=false — телефон офлайн).",
+      "properties": { "t": { "const": "deeplink-ack" }, "delivered": { "type": "boolean" }, "error": { "type": "string" } }
+    },
+    "deeplink-status": {
+      "required": ["t", "ok", "stage"],
+      "description": "Телефон бабушки → приложение (через сервер): итог подписания. stage: opened | signing | signed | failed.",
+      "properties": {
+        "t": { "const": "deeplink-status" },
+        "ok": { "type": "boolean" },
+        "stage": { "type": "string", "maxLength": 32 },
+        "err": { "type": "string", "maxLength": 128 }
+      }
+    }
   }
 }

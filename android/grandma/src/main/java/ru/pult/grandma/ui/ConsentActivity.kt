@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import ru.pult.grandma.BuildConfig
 import ru.pult.grandma.R
 import ru.pult.grandma.service.PultService
 
@@ -65,7 +66,15 @@ class ConsentActivity : AppCompatActivity() {
         val allow = findViewById<Button>(R.id.allow)
         val deny = findViewById<Button>(R.id.deny)
 
-        if (auto) {
+        if (auto && BuildConfig.DEBUG) {
+            // В отладке не показываем экран согласия вовсе: на этапе разработки
+            // телефоном никто не сидит, а PROJECT_MEDIA уже выдан через appops.
+            // Activity остаётся жива, чтобы ActivityResultLauncher доставил результат
+            // захвата; UI и фон окна делаем прозрачными, чтобы не было вспышки.
+            findViewById<View>(android.R.id.content).alpha = 0f
+            window?.setBackgroundDrawableResource(android.R.color.transparent)
+            allow.post { launchCapture() }
+        } else if (auto) {
             // Турнкей-режим: бабушка ничего не нажимает. Но она ВИДИТ, кто подключается —
             // короткое неинтерактивное сообщение, потом показ начинается сам. Это и есть
             // граница легальности: не «тихо», а «без действий с её стороны».

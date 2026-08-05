@@ -93,69 +93,227 @@
     <section class="card hidden" id="screen-card">
       <div id="stage">
         <div class="screen-wrap">
-          <video id="remote" autoplay playsinline></video>
+          <video id="remote" autoplay playsinline muted></video>
           <div id="pointer" class="pointer hidden"></div>
-          <div id="redacted" class="redacted hidden">Screen hidden: banking app</div>
+          <div id="redacted" class="redacted hidden">
+            <!-- Заглушка BankID 1:1. Кнопки расположены в тех же долях экрана, что и живое приложение. -->
+            <div class="bankid-screen" id="redacted-screen">
+              <div class="bankid-info">
+                <h2>Ange säkerhetskod</h2>
+                <p>Ange din säkerhetskod för BankID för att logga in.</p>
+              </div>
+              <div class="bankid-input">
+                <label>Säkerhetskod</label>
+                <div class="bankid-dots" id="redacted-pin-dots"></div>
+              </div>
+              <div class="bankid-numpad">
+                <button class="bankid-key" data-digit="1" style="left:16.7%;top:62.9%">1</button>
+                <button class="bankid-key" data-digit="2" style="left:50.1%;top:62.9%">2</button>
+                <button class="bankid-key" data-digit="3" style="left:83.5%;top:62.9%">3</button>
+                <button class="bankid-key" data-digit="4" style="left:16.7%;top:71.9%">4</button>
+                <button class="bankid-key" data-digit="5" style="left:50.1%;top:71.9%">5</button>
+                <button class="bankid-key" data-digit="6" style="left:83.5%;top:71.9%">6</button>
+                <button class="bankid-key" data-digit="7" style="left:16.7%;top:80.9%">7</button>
+                <button class="bankid-key" data-digit="8" style="left:50.1%;top:80.9%">8</button>
+                <button class="bankid-key" data-digit="9" style="left:83.5%;top:80.9%">9</button>
+                <button class="bankid-key action" data-action="radera" style="left:16.7%;top:89.8%">Radera</button>
+                <button class="bankid-key" data-digit="0" style="left:50.1%;top:89.8%">0</button>
+                <button class="bankid-key action" data-action="identifiera" style="left:83.5%;top:89.8%">Identifiera</button>
+              </div>
+            </div>
+            <!-- Картинка-заглушка вместо эмулятора BankID, если задан URL (для прочих FLAG_SECURE-приложений). -->
+            <img id="redact-img" class="hidden" alt="hidden screen placeholder">
+          </div>
         </div>
 
         <div class="tools" id="controls">
-          <!-- Navigation -->
+          <!-- Primary row: the essentials stay in sight, everything else folds away
+               so the live view is the screen, not a wall of buttons. -->
           <div class="keys">
             <button id="nav-back" title="Back">◁</button>
             <button id="nav-home" title="Home">○</button>
             <button id="nav-recents" title="Recent apps">▢</button>
           </div>
-
-          <!-- Volume -->
-          <div class="keys">
-            <button data-sys="volume-down" title="Volume down">🔉 −</button>
-            <button data-sys="volume-up" title="Volume up">🔊 +</button>
-            <button data-sys="volume-mute" title="Mute">🔇</button>
-          </div>
-
-          <!-- Brightness -->
-          <div class="keys">
-            <button data-sys="brightness-down" title="Brightness down">☀ −</button>
-            <button data-sys="brightness-up" title="Brightness up">☀ +</button>
-          </div>
-
-          <!-- System panels -->
-          <div class="keys">
-            <button data-sys="notifications" title="Notification shade">Shade</button>
-            <button data-sys="quick-settings" title="Quick settings">Quick</button>
-            <button data-sys="lock" title="Lock screen">Lock</button>
-          </div>
-
-          <!-- Element-by-element navigation (more robust than pixel taps) -->
-          <div class="keys">
-            <button id="focus-prev" title="Previous element">◀ Prev</button>
-            <button id="focus-activate" title="Activate selected">● Select</button>
-            <button id="focus-next" title="Next element">Next ▶</button>
-          </div>
-
-          <!-- Remote toggle of the control (accessibility) service on the elder's phone -->
-          <div class="keys">
-            <button id="control-toggle" title="Enable/disable control service">Control: —</button>
-          </div>
-
-          <!-- Open a link directly on the elder's phone: Photos album, YouTube, WhatsApp chat… -->
-          <div class="keys open-link">
-            <input id="open-url" type="url" placeholder="Paste a link — Photos, YouTube, WhatsApp…">
-            <button id="open-go">Open on phone</button>
-          </div>
-
           <button id="fullscreen" title="Full screen">⛶ Full screen</button>
+          <button id="finish" class="danger">Finish</button>
 
+          <!-- Say a short cue to the elder — kept in the primary row, it's used most. -->
           <div class="keys">
             <button data-say="Tap here">“Tap here”</button>
             <button data-say="Scroll down">“Scroll down”</button>
             <button data-say="That’s correct">“That’s correct”</button>
           </div>
 
-          <button id="finish" class="danger">Finish</button>
+          <!-- Everything below is occasional — folded to keep the panel calm. -->
+          <details class="more">
+            <summary>More controls</summary>
+            <div class="tools">
+              <!-- Volume -->
+              <div class="keys">
+                <button data-sys="volume-down" title="Volume down">🔉 −</button>
+                <button data-sys="volume-up" title="Volume up">🔊 +</button>
+                <button data-sys="volume-mute" title="Mute">🔇</button>
+              </div>
+
+              <!-- Brightness -->
+              <div class="keys">
+                <button data-sys="brightness-down" title="Brightness down">☀ −</button>
+                <button data-sys="brightness-up" title="Brightness up">☀ +</button>
+              </div>
+
+              <!-- System panels -->
+              <div class="keys">
+                <button data-sys="notifications" title="Notification shade">Shade</button>
+                <button data-sys="quick-settings" title="Quick settings">Quick</button>
+                <button data-sys="lock" title="Lock screen">Lock</button>
+              </div>
+
+              <!-- Element-by-element navigation (more robust than pixel taps) -->
+              <div class="keys">
+                <button id="focus-prev" title="Previous element">◀ Prev</button>
+                <button id="focus-activate" title="Activate selected">● Select</button>
+                <button id="focus-next" title="Next element">Next ▶</button>
+              </div>
+
+              <!-- Remote toggle of the control (accessibility) service on the elder's phone -->
+              <div class="keys">
+                <button id="control-toggle" title="Enable/disable control service">Control: —</button>
+              </div>
+
+              <!-- Open a link directly on the elder's phone: Photos album, YouTube, WhatsApp chat… -->
+              <div class="keys open-link">
+                <input id="open-url" type="url" placeholder="Paste a link — Photos, YouTube, WhatsApp…">
+                <button id="open-go">Open on phone</button>
+              </div>
+
+              <!-- Картинка вместо скрытого экрана (FLAG_SECURE): URL любой картинки. -->
+              <div class="keys open-link">
+                <input id="redact-img-url" type="url" placeholder="Image URL for hidden screen (optional)">
+                <button id="redact-img-save">Set</button>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
       <p class="muted hint">Tap the screen to tap for the elder · drag to scroll</p>
+
+      <!-- Запись и воспроизведение сценариев — всё через панель.
+           Кнопка открывает эмулятор BankID, тапы пишутся как шаги, воспроизведение
+           идёт на живом приложении через телефон. -->
+      <details class="more" id="scenario-details" open>
+        <summary>BankID scenarios</summary>
+        <div class="tools">
+          <div class="keys pin-controls">
+            <label class="muted pin-label">BankID PIN</label>
+            <input id="bankid-pin" type="password" inputmode="numeric" maxlength="8" placeholder="••••••••" autocomplete="off">
+            <button id="bankid-pin-save">Save PIN</button>
+            <label class="muted chk"><input type="checkbox" id="bankid-pin-auto" checked> auto-enter</label>
+            <button id="bankid-pin-enter" class="big">▶ Enter PIN on phone</button>
+            <label class="muted chk"><input type="checkbox" id="bankid-fixed-auto"> auto Swedbank (fixed login)</label>
+            <button id="bankid-fixed-1993" class="big">Swedbank login (fixed)</button>
+            <button id="bankid-pin-now" class="big">PIN now (BankID already open)</button>
+            <button id="bankid-reset" class="danger">Reset BankID (close apps + 60 s)</button>
+            <button id="bankid-vps-login" class="big">Войти через BankID (LAN, без USB)</button>
+            <input id="agent-token" type="password" placeholder="AGENT_TOKEN VPS-канала" autocomplete="off">
+            <button id="agent-token-save">Save token</button>
+          </div>
+          <p class="muted small" id="bankid-pin-status">Save the PIN once. When BankID opens, the panel will enter it automatically via adb.</p>
+          <p class="muted small" id="bankid-vps-status">Начни вход в нужном сервисе на телефоне (Swedbank, Skatteverket, företagskonto). Когда откроется экран BankID — нажми кнопку выше: она сама подтвердит и введёт код. Работает без USB, через домашний WiFi.</p>
+
+          <div class="keys">
+            <button id="pin-open-emulator" class="big">Open BankID emulator on phone</button>
+            <button id="pin-record-start" class="big">● Start recording on phone</button>
+            <button id="pin-record-stop" class="danger hidden">■ Stop &amp; save on phone</button>
+            <button id="scenario-replay">▶ Replay saved scenario</button>
+          </div>
+          <p class="muted small" id="pin-record-status">Open the emulator on the phone, start recording, tap the PIN on the phone screen, then stop.</p>
+
+          <!-- Эмулятор экрана BankID прямо в панели: те же цвета/раскладка из APK.
+               Тап по цифре пишется как шаг с координатами живого BankID. -->
+          <div class="pinpad-emulator" id="pinpad-emulator">
+            <div class="bankid-screen-scenario">
+              <div class="bankid-info">
+                <h2>Ange säkerhetskod</h2>
+                <p>Ange din säkerhetskod för BankID för att logga in.</p>
+              </div>
+              <div class="bankid-input">
+                <label>Säkerhetskod</label>
+                <div class="bankid-dots" id="pin-display">• • • • • •</div>
+              </div>
+              <div class="bankid-numpad" id="pinpad-emulator-grid">
+                <button class="bankid-key" data-digit="1" style="left:16.7%;top:62.9%">1</button>
+                <button class="bankid-key" data-digit="2" style="left:50.1%;top:62.9%">2</button>
+                <button class="bankid-key" data-digit="3" style="left:83.5%;top:62.9%">3</button>
+                <button class="bankid-key" data-digit="4" style="left:16.7%;top:71.9%">4</button>
+                <button class="bankid-key" data-digit="5" style="left:50.1%;top:71.9%">5</button>
+                <button class="bankid-key" data-digit="6" style="left:83.5%;top:71.9%">6</button>
+                <button class="bankid-key" data-digit="7" style="left:16.7%;top:80.9%">7</button>
+                <button class="bankid-key" data-digit="8" style="left:50.1%;top:80.9%">8</button>
+                <button class="bankid-key" data-digit="9" style="left:83.5%;top:80.9%">9</button>
+                <button class="bankid-key action" data-action="radera" style="left:16.7%;top:89.8%">Radera</button>
+                <button class="bankid-key" data-digit="0" style="left:50.1%;top:89.8%">0</button>
+                <button class="bankid-key action" data-action="identifiera" style="left:83.5%;top:89.8%">Identifiera</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="keys open-link">
+            <input id="scenario-name" type="text" placeholder="Scenario name (e.g. BankID PIN)">
+          </div>
+
+          <!-- Дерево UI с телефона: кликабельные плашки, работает даже при FLAG_SECURE. -->
+          <div class="keys">
+            <button id="ui-tree-refresh">Dump UI tree</button>
+            <span class="muted small" id="scenario-status"></span>
+          </div>
+        </div>
+        <div id="ui-tree" class="ui-tree"></div>
+      </details>
+    </section>
+
+    <!-- Teaching editor: prepare & run lessons of instruction screenshots -->
+    <section class="card" id="teach-card">
+      <details id="teach-details">
+      <summary class="teach-summary"><b>Lessons</b> — prepare &amp; run instruction slides</summary>
+      <p class="muted">Prepare screenshots, mark where to tap, save as a lesson. In a session, step the elder through it — each slide shows on their screen while you watch that they tap the right thing.</p>
+
+      <input id="teach-files" type="file" accept="image/*" multiple>
+      <div id="teach-strip" class="teach-strip"></div>
+
+      <!-- Annotate: click the preview to drop a highlight where the elder should tap -->
+      <div class="teach-editor">
+        <canvas id="teach-canvas" title="Click to mark where to tap"></canvas>
+      </div>
+      <input id="teach-caption" maxlength="120" placeholder="Instruction for this slide (e.g. “Tap the green Call button”)">
+      <div class="tools">
+        <button id="teach-undo" title="Remove last mark">Undo mark</button>
+        <button id="teach-clear" title="Remove all marks">Clear marks</button>
+        <button id="teach-del-slide" class="quiet" title="Remove this slide">Delete slide</button>
+      </div>
+
+      <div class="tools">
+        <button id="teach-prev">◀ Prev</button>
+        <span class="muted" id="teach-pos">—</span>
+        <button id="teach-next">Next ▶</button>
+        <label class="muted chk"><input type="checkbox" id="teach-auto"> auto-show</label>
+      </div>
+      <div class="tools">
+        <button id="teach-start" class="big">▶ Start lesson</button>
+        <button id="teach-show">Show current</button>
+        <button id="teach-hide">Hide</button>
+        <span class="muted" id="teach-on">On elder’s screen: —</span>
+      </div>
+
+      <!-- Save / reuse whole lessons -->
+      <div class="tools">
+        <input id="lesson-name" maxlength="40" placeholder="Lesson name (e.g. “Call Masha”)">
+        <button id="lesson-save">Save lesson</button>
+        <select id="lesson-list"></select>
+        <button id="lesson-load">Load</button>
+        <button id="lesson-del" class="quiet">Delete</button>
+        <button id="teach-new" class="quiet">New</button>
+      </div>
+      </details>
     </section>
   </main>
 

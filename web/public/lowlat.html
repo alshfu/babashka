@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pult — low-latency prototype</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0f1115; color: #eceff4; display: flex; flex-direction: column; height: 100vh; }
+    header { padding: 0.5rem 1rem; background: #1d2026; border-bottom: 1px solid #2c313a; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+    .brand { font-weight: 700; }
+    #hud { color: #4cd97b; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+    .wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; position: relative; }
+    #screen { max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; cursor: crosshair; background: #000; }
+    .keys { display: flex; gap: 0.4rem; padding: 0.5rem; background: #1d2026; border-top: 1px solid #2c313a; justify-content: center; }
+    button { font: inherit; color: #eceff4; background: #2b303a; border: 1px solid #2c313a; border-radius: 10px; padding: 0.5rem 1rem; cursor: pointer; }
+    button:hover { background: #343a46; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">Pult · low-latency</span>
+    <span id="hud">connecting…</span>
+    <span style="margin-left:auto;color:#949aa6;font-size:0.85rem">H.264 → WebSocket → WebCodecs (прототип)</span>
+  </header>
+  <div class="wrap">
+    <canvas id="screen" width="720" height="1280"></canvas>
+  </div>
+  <div class="keys">
+    <button id="nav-back" title="Back">◁</button>
+    <button id="nav-home" title="Home">○</button>
+    <button id="nav-recents" title="Recent apps">▢</button>
+  </div>
+  <script src="/panel/lowlat.js"></script>
+</body>
+</html>

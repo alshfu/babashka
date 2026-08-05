@@ -10,6 +10,8 @@ const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
 const SAFE_FIELDS = new Set([
   'pairId', 'role', 'type', 'sessionId', 'reason', 'code', 'deviceId',
   'count', 'ms', 'port', 'pairs', 'sessions', 'path', 'status',
+  // Операционные метрики lowlat-релея (комната, размер, буфер, дропы) — не контент.
+  'room', 'size', 'buffered', 'dropped',
 ]);
 
 function sanitize(fields) {

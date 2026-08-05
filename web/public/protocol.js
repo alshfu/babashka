@@ -72,7 +72,7 @@ export function normalizeFingerprint(algorithm, hex) {
 
 export function fingerprintFromSdp(sdp) {
   const match = /^a=fingerprint:(\S+)\s+(\S+)/m.exec(sdp ?? '');
-  if (!match) throw new Error('SDP has no a=fingerprint — the connection is not secure');
+  if (!match) throw new Error('нет a=fingerprint — соединение не защищено');
   return normalizeFingerprint(match[1], match[2]);
 }
 

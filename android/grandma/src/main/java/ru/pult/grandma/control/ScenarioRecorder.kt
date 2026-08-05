@@ -61,6 +61,22 @@ class ScenarioRecorder(
         onStateChange?.invoke(true)
     }
 
+    /**
+     * Прямая запись координатного шага — для эмулятора BankID.
+     * Тап по копии экрана пишется как click с долями экрана, без accessibility-события.
+     */
+    fun addCoordinateStep(x: Float, y: Float, pkg: String, label: String? = null) {
+        if (!isRecording) return
+        steps += Step(
+            kind = "click",
+            delayMs = takeDelay(),
+            expectPackage = pkg,
+            text = label,
+            x = x,
+            y = y,
+        )
+    }
+
     /** Останавливает запись и отдаёт снятые шаги. */
     fun stop(): List<Step> {
         isRecording = false

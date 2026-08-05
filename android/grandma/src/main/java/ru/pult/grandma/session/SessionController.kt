@@ -220,10 +220,10 @@ class SessionController(
     }
 
     /** Гашение на банковских приложениях. Инициатива всегда на стороне бабушки. */
-    fun setRedacted(on: Boolean) {
+    fun setRedacted(on: Boolean, packageName: String? = null) {
         if (!machine.canCaptureScreen) return
         scope.launch {
-            transport.setRedacted(on, ForegroundAppWatcher.REDACT_REASON)
+            transport.setRedacted(on, ForegroundAppWatcher.REDACT_REASON, packageName)
             _ui.value = Ui.Session(pair.peerName, redacted = on)
         }
     }

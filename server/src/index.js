@@ -9,6 +9,10 @@ import { createRequestHandler } from './http.js';
 import { createPush } from './push.js';
 import { Hub } from './hub.js';
 import { Journal } from './journal.js';
+import { createLowLatencyWss } from './lowlat.js';
+import { createAgentChannel } from './agent.js';
+import { createLinkChannel } from './link.js';
+import { createTunnelWss } from './tunnel.js';
 import { log } from './log.js';
 
 /**
@@ -27,8 +31,14 @@ export async function createApp(overrides = {}) {
   const push = createPush({ config });
   const hub = new Hub({ config, journal, push });
   const startedAt = Date.now();
+  const agentChannel = createAgentChannel({ config });
+  // Шлюз BankID-диплинков: статусы с телефона бабушки уходят в /link-канал.
+  const linkChannel = createLinkChannel({ config, hub });
+  hub.onDeeplinkStatus = (pairId, status) => linkChannel.notifyStatus(pairId, status);
+  // TCP-туннель приложение ⇄ телефон (шведский IP для банковского приложения).
+  const tunnelWss = createTunnelWss({ config });
 
-  const handler = createRequestHandler({ config, hub, journal, startedAt });
+  const handler = createRequestHandler({ config, hub, journal, startedAt, agentChannel });
 
   // Обработчик одного WebSocket-подключения. Одинаков для обычного и TLS-листенера,
   // оба кормят один и тот же hub — телефон (ws) и панель (wss) оказываются в одной комнате.
@@ -70,8 +80,38 @@ export async function createApp(overrides = {}) {
     return wss;
   };
 
+  // Прототип низколатентной трансляции (H.264 по WebSocket) — общий на оба листенера.
+  const lowlatWss = createLowLatencyWss();
+
+  // Маршрутизация апгрейдов вручную (noServer): на одном http-сервере живут два WSS —
+  // `/ws` (сигналинг) и `/lowlat` (прототип). Если оба вешать через {server, path}, они
+  // конфликтуют и чужой путь отбивается с 400. Роутим сами по pathname.
+  const routeUpgrade = (mainWss) => (req, socket, head) => {
+    let pathname;
+    try {
+      pathname = new URL(req.url, 'http://x').pathname;
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (pathname === '/ws') {
+      mainWss.handleUpgrade(req, socket, head, (ws) => mainWss.emit('connection', ws, req));
+    } else if (pathname === '/lowlat') {
+      lowlatWss.handleUpgrade(req, socket, head, (ws) => lowlatWss.emit('connection', ws, req));
+    } else if (pathname === '/agent') {
+      agentChannel.wss.handleUpgrade(req, socket, head, (ws) => agentChannel.wss.emit('connection', ws, req));
+    } else if (pathname === '/link') {
+      linkChannel.wss.handleUpgrade(req, socket, head, (ws) => linkChannel.wss.emit('connection', ws, req));
+    } else if (pathname === '/tunnel') {
+      tunnelWss.handleUpgrade(req, socket, head, (ws) => tunnelWss.emit('connection', ws, req));
+    } else {
+      socket.destroy();
+    }
+  };
+
   const server = createServer(handler);
-  const wss = wireWss(new WebSocketServer({ server, path: '/ws', maxPayload: config.maxMessageBytes * 4 }));
+  const wss = wireWss(new WebSocketServer({ noServer: true, maxPayload: config.maxMessageBytes * 4 }));
+  server.on('upgrade', routeUpgrade(wss));
 
   // TLS-листенер (https + wss) — только если заданы сертификат и ключ.
   let tlsServer = null;
@@ -81,7 +121,8 @@ export async function createApp(overrides = {}) {
       { cert: readFileSync(config.tlsCert), key: readFileSync(config.tlsKey) },
       handler,
     );
-    tlsWss = wireWss(new WebSocketServer({ server: tlsServer, path: '/ws', maxPayload: config.maxMessageBytes * 4 }));
+    tlsWss = wireWss(new WebSocketServer({ noServer: true, maxPayload: config.maxMessageBytes * 4 }));
+    tlsServer.on('upgrade', routeUpgrade(tlsWss));
   }
 
   const allClients = () => [...wss.clients, ...(tlsWss ? tlsWss.clients : [])];
@@ -114,6 +155,7 @@ export async function createApp(overrides = {}) {
     server,
     wss,
     tlsServer,
+    agentChannel,
     listen: async () => {
       const port = await new Promise((done) => {
         server.listen(config.port, config.host, () => {
@@ -136,6 +178,12 @@ export async function createApp(overrides = {}) {
       clearInterval(pruneTimer);
       hub.shutdown();
       for (const socket of allClients()) socket.terminate();
+      for (const socket of agentChannel.wss.clients) socket.terminate();
+      for (const socket of linkChannel.wss.clients) socket.terminate();
+      for (const socket of tunnelWss.clients) socket.terminate();
+      await new Promise((done) => agentChannel.wss.close(done));
+      await new Promise((done) => linkChannel.wss.close(done));
+      await new Promise((done) => tunnelWss.close(done));
       await new Promise((done) => wss.close(done));
       if (tlsWss) await new Promise((done) => tlsWss.close(done));
       await new Promise((done) => server.close(done));

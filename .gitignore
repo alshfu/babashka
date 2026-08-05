@@ -19,3 +19,13 @@ google-services.json
 .idea/shelf/
 .DS_Store
 out/
+
+# Рабочие данные, логи и артефакты — не для гита
+data/
+test_logs/
+docs.zip
+.venv/
+just_for_privat_use_and_test/
+__pycache__/
+*.pyc
+build/

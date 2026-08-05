@@ -106,6 +106,23 @@ sealed interface Signal {
     @SerialName("session-end")
     data class SessionEnd(val sessionId: String, val reason: String) : Signal
 
+    // ── Шлюз BankID-диплинков (канал /link, WebRTC-сессия не нужна) ────────────
+
+    /** Сервер → бабушка: открыть BankID-диплинк (autostarttoken от приложения шлюза). */
+    @Serializable
+    @SerialName("deeplink")
+    data class Deeplink(val url: String) : Signal
+
+    /** Сервер → бабушка: начать/завершить lowlat-трансляцию экрана (канал /link). */
+    @Serializable
+    @SerialName("screencast")
+    data class Screencast(val on: Boolean) : Signal
+
+    /** Бабушка → сервер (→ приложение шлюза): итог подписания. stage: opened|signed|failed. */
+    @Serializable
+    @SerialName("deeplink-status")
+    data class DeeplinkStatus(val ok: Boolean, val stage: String, val err: String = "") : Signal
+
     // ── Служебное ───────────────────────────────────────────────────────────
 
     @Serializable

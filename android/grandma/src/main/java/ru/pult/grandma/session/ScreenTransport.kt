@@ -43,7 +43,7 @@ interface ScreenTransport {
     fun releaseCapture()
 
     /** Гашение: трек снимается с отправителя, соединение остаётся. Решает устройство бабушки. */
-    suspend fun setRedacted(on: Boolean, reason: String)
+    suspend fun setRedacted(on: Boolean, reason: String, packageName: String? = null)
 
     fun sendControl(payload: String)
 

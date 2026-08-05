@@ -22,8 +22,51 @@ class SessionOverlay(private val context: Context) {
     private val windows = context.getSystemService(WindowManager::class.java)
     private var frameWindow: FrameLayout? = null
     private var pointer: View? = null
+    private var slideWindow: FrameLayout? = null
 
     fun canDraw(): Boolean = Settings.canDrawOverlays(context)
+
+    /**
+     * Обучающий слайд: крупная подготовленная картинка-инструкция поверх экрана + подпись.
+     * Внук листает слайды со своей панели, бабушка смотрит демонстрацию. Окно ловит касания
+     * (не passthrough) — чтобы во время показа инструкции бабушка случайно не нажала своё
+     * приложение под слайдом; когда внук скроет слайд, она действует уже сама.
+     */
+    fun showSlide(bitmap: android.graphics.Bitmap, caption: String?) {
+        if (!canDraw()) return
+        hideSlide()
+        val root = FrameLayout(context).apply { setBackgroundColor(Color.parseColor("#EE000000")) }
+
+        val image = android.widget.ImageView(context).apply {
+            setImageBitmap(bitmap)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        }
+        root.addView(image, FrameLayout.LayoutParams(MATCH, MATCH))
+
+        if (!caption.isNullOrBlank()) {
+            val label = android.widget.TextView(context).apply {
+                text = caption
+                setTextColor(Color.WHITE)
+                textSize = 20f
+                setPadding(dp(16), dp(12), dp(16), dp(12))
+                background = GradientDrawable().apply { setColor(Color.parseColor("#CC22C55E")) }
+            }
+            root.addView(
+                label,
+                FrameLayout.LayoutParams(WRAP, WRAP).apply {
+                    gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+                    bottomMargin = dp(28)
+                },
+            )
+        }
+        windows.addView(root, blockingParams())
+        slideWindow = root
+    }
+
+    fun hideSlide() {
+        slideWindow?.let(windows::removeView)
+        slideWindow = null
+    }
 
     /**
      * По согласованному дизайну оверлей — это ТОЛЬКО тонкая зелёная рамка вокруг экрана
@@ -31,31 +74,11 @@ class SessionOverlay(private val context: Context) {
      * не заслоняя экран. Никаких больших кнопок и баннеров поверх — чисто и спокойно.
      */
     fun show(peerName: String, onStop: () -> Unit) {
-        if (frameWindow != null) return
-        if (!canDraw()) return
-
-        val accent = Color.parseColor("#22C55E")
-        val root = FrameLayout(context)
-
-        // Рамка по периметру — тонкая линия, без пульсации.
-        val frame = View(context).apply {
-            background = GradientDrawable().apply {
-                setStroke(dp(2), accent)
-                setColor(Color.TRANSPARENT)
-            }
-        }
-        root.addView(frame, FrameLayout.LayoutParams(MATCH, MATCH))
-
-        // Указатель внука.
-        val dot = View(context).apply {
-            background = context.getDrawable(R.drawable.pointer_ring)
-            visibility = View.GONE
-        }
-        root.addView(dot, FrameLayout.LayoutParams(dp(POINTER_DP), dp(POINTER_DP)))
-        pointer = dot
-
-        windows.addView(root, passthroughParams())
-        frameWindow = root
+        // BankID и другие банковские приложения отказываются работать при наличии
+        // любого системного оверлея (даже passthrough-рамки). Поэтому визуальную рамку
+        // не показываем вовсе — статус сессии остаётся в уведомлении у часов.
+        // Если потребуется вернуть рамку, добавить проверку «на экране нет банков».
+        return
     }
 
     /**
@@ -120,6 +143,7 @@ class SessionOverlay(private val context: Context) {
         frameWindow?.let(windows::removeView)
         frameWindow = null
         pointer = null
+        hideSlide()
     }
 
     /** Рамка и указатель: видно, но касания проходят насквозь (навигация внизу работает). */
@@ -128,6 +152,16 @@ class SessionOverlay(private val context: Context) {
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        PixelFormat.TRANSLUCENT,
+    )
+
+    /** Слайд перекрывает экран и ЛОВИТ касания (не passthrough): бабушка смотрит, не мажет. */
+    private fun blockingParams() = WindowManager.LayoutParams(
+        MATCH, MATCH,
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        // Не FOCUSABLE (кнопки Назад/Домой у бабушки работают), но касания ловит.
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT,
     )

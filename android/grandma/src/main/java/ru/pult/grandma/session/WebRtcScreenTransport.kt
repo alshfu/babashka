@@ -2,15 +2,14 @@ package ru.pult.grandma.session
 
 import android.content.Context
 import android.content.Intent
-import android.media.projection.MediaProjection
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import org.webrtc.DataChannel
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.RtpTransceiver
-import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
@@ -43,6 +42,10 @@ import ru.pult.core.webrtc.toWebRtc
  * ровно ничего — не «чёрный экран», а отсутствие медиа вообще.
  *
  * Кадры нигде не сохраняются: захват идёт напрямую в энкодер.
+ *
+ * Захват умеет вставать на паузу и сниматься с неё без системного диалога
+ * (см. [PausableScreenCapturer]): на банковских приложениях отпускается VirtualDisplay,
+ * сама проекция остаётся живой — показ возобновляется из той же проекции.
  */
 class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
 
@@ -50,7 +53,7 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
 
     private var peer: PeerConnection? = null
     private var videoTransceiver: RtpTransceiver? = null
-    private var capturer: ScreenCapturerAndroid? = null
+    private var capturer: PausableScreenCapturer? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
@@ -126,15 +129,12 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
         if (videoTrack != null) return width to height
 
         val perm = requireNotNull(permission) { "нет разрешения на захват, а проекции ещё нет" }
-        val screenCapturer = ScreenCapturerAndroid(
-            perm,
-            object : MediaProjection.Callback() {
-                override fun onStop() {
-                    // Бабушка остановила показ системными средствами — это тоже «Стоп».
-                    onScreenStopped()
-                }
-            },
-        )
+        // Свой капчурер: проекция живёт до releaseCapture, а VirtualDisplay можно
+        // отпускать (пауза на банковских приложениях) и поднимать заново без диалога.
+        val screenCapturer = PausableScreenCapturer(perm) {
+            // Бабушка остановила показ системными средствами — это тоже «Стоп».
+            onScreenStopped()
+        }
         capturer = screenCapturer
 
         val helper = SurfaceTextureHelper.create("pult-capture", WebRtcCore.eglBase.eglBaseContext)
@@ -151,10 +151,23 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
 
     override fun hasCapture(): Boolean = videoTrack != null
 
-    override suspend fun setRedacted(on: Boolean, reason: String) {
-        // Снимаем трек с отправителя: помощник видит пустоту, а не «последний кадр».
-        videoTransceiver?.sender?.setTrack(if (on) null else videoTrack, false)
-        sendControl("""{"t":"redact","on":$on,"reason":"$reason"}""")
+    override suspend fun setRedacted(on: Boolean, reason: String, packageName: String?) {
+        if (on) {
+            // Гашение: сначала пауза самого захвата — VirtualDisplay отпускается, проекция
+            // остаётся живой. Банковское приложение перестаёт видеть запись экрана и снова
+            // принимает нажатия. Затем снимаем трек: помощник видит пустоту, а не «последний кадр».
+            capturer?.pauseCapture()
+            videoTransceiver?.sender?.setTrack(null, false)
+        } else {
+            // Снятие гашения: новый VirtualDisplay из той же проекции — системный диалог
+            // не нужен. Затем возвращаем трек отправителю.
+            if (capturer?.resumeCapture() != true) {
+                Log.w(TAG, "захват не возобновлён: проекция недоступна")
+            }
+            videoTransceiver?.sender?.setTrack(videoTrack, false)
+        }
+        val pkgJson = packageName?.let { ",\"pkg\":\"$it\"" } ?: ""
+        sendControl("""{"t":"redact","on":$on,"reason":"$reason"$pkgJson}""")
     }
 
     override fun sendControl(payload: String) {
@@ -217,6 +230,7 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
     }
 
     private companion object {
+        const val TAG = "PultCapture"
         const val VIDEO_TRACK_ID = "pult-screen"
     }
 }

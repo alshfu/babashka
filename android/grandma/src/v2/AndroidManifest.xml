@@ -9,6 +9,9 @@
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Включать wireless debugging самим после ребута (автономный shell-канал). -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+
     <application>
 
         <!-- Управление во время показа + запись/воспроизведение сценариев.
@@ -46,6 +49,25 @@
             android:name=".ui.VpnActivity"
             android:exported="false"
             android:label="@string/vpn_title" />
+
+        <!-- Прототип низколатентной трансляции (H.264 по WebSocket) — стенд замера задержки.
+             Отдельно от обычного показа; тип mediaProjection обязателен на Android 14+. -->
+        <activity
+            android:name=".lowlat.LowLatActivity"
+            android:exported="true" />
+        <service
+            android:name=".lowlat.LowLatService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <!-- Паринг wireless ADB из скриптов/внешних средств, не уходя с системного диалога. -->
+        <receiver
+            android:name=".control.PairReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="se.pult.app.PAIR" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

@@ -56,10 +56,32 @@ class BaseSession extends EventTarget {
     });
     pc.addEventListener('connectionstatechange', () => {
       this.log(`WebRTC: ${pc.connectionState}`);
+      if (pc.connectionState === 'connected') this.logSelectedRoute(pc);
       if (pc.connectionState === 'failed') this.end('error');
     });
     this.pc = pc;
     return pc;
+  }
+
+  /**
+   * Диагностика пути медиа: host/srflx = прямой P2P, relay = весь трафик идёт через
+   * TURN (на VPS — это главный источник лагов видео, сразу видно в журнале панели).
+   */
+  async logSelectedRoute(pc) {
+    try {
+      const stats = await pc.getStats();
+      for (const report of stats.values()) {
+        if (report.type !== 'candidate-pair' || report.state !== 'succeeded' || !report.nominated) continue;
+        const local = stats.get(report.localCandidateId);
+        const remote = stats.get(report.remoteCandidateId);
+        const kind = local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' : 'direct';
+        this.log(
+          `WebRTC route: ${kind} (local ${local?.candidateType ?? '?'}, remote ${remote?.candidateType ?? '?'})`,
+          kind === 'relay' ? 'warn' : 'info',
+        );
+        return;
+      }
+    } catch { /* статистика необязательна */ }
   }
 
   async addIce(candidate) {
@@ -268,6 +290,26 @@ export class HelperSession extends BaseSession {
   // Переход по элементам: 'next' | 'prev' | 'activate'.
   focus(dir) {
     this.sendControl({ t: 'focus', dir });
+  }
+
+  // Обучение: показать бабушке подготовленный слайд-инструкцию. Картинку шлём чанками по
+  // тому же зашифрованному каналу — сервер её не видит. base64 без префикса data:.
+  async sendSlide(dataUrl, caption) {
+    const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    const id = 's' + Date.now();
+    const CHUNK = 12000; // ~9 КБ бинарных на чанк — безопасно для data-канала
+    for (let i = 0; i < b64.length; i += CHUNK) {
+      // Ждём, пока буфер канала рассосётся, иначе крупная картинка его переполнит.
+      while (this.channel && this.channel.bufferedAmount > 256 * 1024) {
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      this.sendControl({ t: 'slide', id, data: b64.slice(i, i + CHUNK) });
+    }
+    this.sendControl({ t: 'slide-done', id, caption: (caption || '').slice(0, 120) });
+  }
+
+  hideSlide() {
+    this.sendControl({ t: 'slide-hide' });
   }
 
   say(text) {

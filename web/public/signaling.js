@@ -14,6 +14,8 @@ export class Signaling extends EventTarget {
   #retry = 0;
   #closedByUs = false;
   #pingTimer = null;
+  #replacedAt = [];
+  #generation = 0;
 
   constructor(url, identity) {
     super();
@@ -27,11 +29,13 @@ export class Signaling extends EventTarget {
 
   connect() {
     this.#closedByUs = false;
+    this.#generation += 1;
     this.#open();
   }
 
   close() {
     this.#closedByUs = true;
+    this.#generation += 1;
     clearInterval(this.#pingTimer);
     this.#socket?.close();
     this.#socket = null;
@@ -68,11 +72,25 @@ export class Signaling extends EventTarget {
       } catch {
         return;
       }
-      // Нас вытеснила другая вкладка с той же ролью. Значит эта — дубликат:
-      // не переподключаемся, иначе две вкладки будут бесконечно выбивать друг друга
-      // («replaced» по кругу, присутствие прыгает).
+      // Нас вытеснил другой сокет с той же ролью. Часто это собственный дубль:
+      // после перезагрузки страницы старый сокет жив ещё пару секунд и сервер
+      // выбивает его новым (или наоборот). Вместо смерти забираем роль обратно
+      // через паузу — но не чаще 3 раз в минуту: при живой второй вкладке
+      // проигрываем, чтобы не драться с ней вечно.
       if (message.t === 'error' && message.code === 'replaced') {
         this.#closedByUs = true;
+        const now = Date.now();
+        this.#replacedAt = this.#replacedAt.filter((t) => now - t < 60_000);
+        this.#replacedAt.push(now);
+        if (this.#replacedAt.length <= 3) {
+          const gen = this.#generation;
+          setTimeout(() => {
+            if (gen !== this.#generation) return; // за паузу вкладку закрыли/переподключили
+            this.#closedByUs = false;
+            this.#retry = 0;
+            this.#open();
+          }, 8000);
+        }
       }
       this.dispatchEvent(new CustomEvent('message', { detail: message }));
       this.dispatchEvent(new CustomEvent(message.t, { detail: message }));

@@ -53,6 +53,10 @@ export const config = {
   sessionIdleTimeoutMs: num('SESSION_IDLE_TIMEOUT_MS', 10 * 60_000),
   messagesPerWindow: num('MESSAGES_PER_WINDOW', 60),
   rateWindowMs: num('RATE_WINDOW_MS', 10_000),
+
+  // Канал «VPS ⇄ агент» (server/src/agent.js): команды панели на телефон через
+  // домашний мост (BankID-вход по LAN). Пусто → канал закрыт.
+  agentToken: process.env.AGENT_TOKEN ?? '',
   // Полуоткрытые сокеты над мобильным Wi-Fi надо ловить быстро, иначе сервер считает
   // телефон «в сети», пока тот молчит, и запрос помощи уходит в никуда.
   heartbeatMs: num('HEARTBEAT_MS', 12_000),
