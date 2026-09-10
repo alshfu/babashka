@@ -6,11 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'screencast.dart';
 
 /// B-app (Controller) på Note 10.
 ///
-/// Visar parade A-app-enheter (Readme), låter användaren välja vilken som ska
-/// hantera BankID och genom vilken all webbtrafik ska gå. Sparar inga PIN-koder.
+/// Första skärmen är listan över tillgängliga A-app-enheter. Ett tryck på en
+/// enhet öppnar dess styrsida: delad skärm (lowlat) och tunnel för all trafik.
+/// BankID-signeringsstatus syns på styrsidan. Appen sparar inga PIN-koder.
 void main() => runApp(const ControllerApp());
 
 class ControllerApp extends StatelessWidget {
@@ -20,7 +22,7 @@ class ControllerApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'Pult – Kontroll',
         theme: ThemeData.dark(useMaterial3: true),
-        home: const HomePage(),
+        home: const DeviceListPage(),
       );
 }
 
@@ -60,17 +62,17 @@ class Device {
   }
 }
 
-class LinkBridge {
-  LinkBridge({required this.onChanged});
-
+class LinkBridge extends ChangeNotifier {
   static const defaultServer = 'wss://85.190.98.57.sslip.io:8445';
   static const defaultPairId = 'demo-pair-000000000000';
   static const _ch = MethodChannel('pult.gateway/link');
   static const _control = MethodChannel('pult.gateway/control');
+  static const tunnelPort = 8877;
 
   String server = defaultServer;
   String pairId = defaultPairId;
   String token = '';
+  String? selectedDeviceId;
 
   bool online = false;
   SignStage stage = SignStage.idle;
@@ -78,16 +80,22 @@ class LinkBridge {
   bool tunnelOnline = false;
   int tunnelStreams = 0;
 
+  bool proxyOn = false;
+  bool proxyWanted = true;
+
   List<Device> devices = [];
 
-  final VoidCallback onChanged;
-
-  Future<void> start() async {
+  Future<void> init() async {
     _ch.setMethodCallHandler((call) async {
       if (call.method == 'changed') await refresh();
     });
+    await _loadSettings();
     await refresh();
     await loadDevices();
+    unawaited(connect());
+    await refreshProxyState();
+    // Забытый включённый прокси без живого туннеля — снять, иначе сеть мертва.
+    if (proxyOn && !tunnelOnline) await _setProxy(false);
   }
 
   Future<void> connect() async {
@@ -117,7 +125,15 @@ class LinkBridge {
         lastError = msg['ok'] == true ? '' : (msg['err'] as String? ?? 'fel');
       }
     } catch (_) {}
-    onChanged();
+    // Туннель умер — прокси недействителен; туннель поднялся — вернуть прокси,
+    // если он был желан (Swedbank-трафик Note 10 должен выходить со шведским IP).
+    if (!tunnelOnline && proxyOn) {
+      await _setProxy(false);
+    } else if (tunnelOnline && proxyWanted && !proxyOn) {
+      await toggleProxy(true);
+      return; // toggleProxy сам зовёт notifyListeners
+    }
+    notifyListeners();
   }
 
   Future<void> clearStatus() async {
@@ -126,7 +142,7 @@ class LinkBridge {
     } catch (_) {}
     stage = SignStage.idle;
     lastError = '';
-    onChanged();
+    notifyListeners();
   }
 
   Future<void> loadDevices() async {
@@ -145,10 +161,10 @@ class LinkBridge {
           online: m['online'] == true,
         );
       }).toList();
-    } catch (e) {
+    } catch (_) {
       devices = [];
     }
-    onChanged();
+    notifyListeners();
   }
 
   Future<bool> sendScreencast(bool on) async {
@@ -160,99 +176,35 @@ class LinkBridge {
     }
   }
 
-  Future<void> dispose() async {}
-}
-
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
-
-  @override
-  State<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends State<HomePage> {
-  late final LinkBridge client;
-  String _ipTestResult = '';
-  bool _proxyOn = false;
-  bool _proxyWanted = false;
-  static const _control = MethodChannel('pult.gateway/control');
-  static const _tunnelPort = 8877;
-  String? _selectedDeviceId;
-
-  @override
-  void initState() {
-    super.initState();
-    client = LinkBridge(onChanged: () {
-      if (!client.tunnelOnline && _proxyOn) _dropProxy();
-      if (client.tunnelOnline && _proxyWanted && !_proxyOn) _toggleProxy(true);
-      if (mounted) setState(() {});
-    });
-    _loadSettings().then((_) {
-      client.start();
-      client.connect();
-      _proxyWanted = true;
-      _refreshProxyState().then((_) {
-        if (_proxyOn && !client.tunnelOnline) _dropProxy();
-      });
-    });
-  }
-
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    client.server = prefs.getString('server') ?? LinkBridge.defaultServer;
-    client.pairId = prefs.getString('pairId') ?? LinkBridge.defaultPairId;
-    client.token = prefs.getString('token') ?? '';
-    _selectedDeviceId = prefs.getString('selectedDeviceId');
-  }
-
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server', client.server);
-    await prefs.setString('pairId', client.pairId);
-    await prefs.setString('token', client.token);
-    if (_selectedDeviceId != null) {
-      await prefs.setString('selectedDeviceId', _selectedDeviceId!);
-    } else {
-      await prefs.remove('selectedDeviceId');
-    }
-  }
-
-  Future<void> _selectDevice(Device device) async {
-    setState(() => _selectedDeviceId = device.deviceId);
+  Future<void> selectDevice(Device device) async {
+    selectedDeviceId = device.deviceId;
     await _saveSettings();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('flutter.selectedDeviceId', device.deviceId);
-    if (client.tunnelOnline && !_proxyOn) _toggleProxy(true);
+    if (tunnelOnline && proxyWanted && !proxyOn) await toggleProxy(true);
+    notifyListeners();
   }
 
-  Future<void> _refreshProxyState() async {
+  Future<void> toggleProxy(bool on) async {
+    await _setProxy(on);
+    proxyWanted = on;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> _setProxy(bool on) async {
+    await _control.invokeMethod<bool>('setProxy', {'on': on, 'port': tunnelPort});
+    proxyOn = on;
+  }
+
+  Future<void> refreshProxyState() async {
     try {
       final value = await _control.invokeMethod<String>('getProxy');
-      if (mounted) setState(() => _proxyOn = value != null && value.contains('8877'));
+      proxyOn = value != null && value.contains('$tunnelPort');
     } catch (_) {}
   }
 
-  Future<void> _toggleProxy(bool on) async {
-    try {
-      await _control.invokeMethod<bool>('setProxy', {'on': on, 'port': _tunnelPort});
-      _proxyWanted = on;
-      setState(() => _proxyOn = on);
-    } catch (e) {
-      setState(() => _ipTestResult = 'Kunde inte ändra proxyn: $e');
-    }
-  }
-
-  Future<void> _dropProxy() async {
-    try {
-      await _control.invokeMethod<bool>('setProxy', {'on': false, 'port': _tunnelPort});
-    } catch (_) {}
-    if (mounted) setState(() => _proxyOn = false);
-  }
-
-  Future<void> _testPublicIp() async {
-    setState(() {
-      _ipTestResult = 'Kontrollerar…';
-    });
+  /// Publik IP — via aktuell systemproxy, dvs. med tunnel ON är det den
+  /// valda A-app-enhetens adress.
+  Future<String> testPublicIp() async {
     try {
       final request = await HttpClient()
           .getUrl(Uri.parse('https://api.ipify.org?format=json'))
@@ -260,10 +212,76 @@ class _HomePageState extends State<HomePage> {
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
       final ip = (jsonDecode(body) as Map<String, dynamic>)['ip'] as String? ?? '?';
-      setState(() => _ipTestResult = 'Publik IP: $ip');
+      return 'Publik IP: $ip';
     } catch (e) {
-      setState(() => _ipTestResult = 'Det gick inte att kontrollera IP: $e');
+      return 'Det gick inte att kontrollera IP: $e';
     }
+  }
+
+  /// Страница просмотра lowlat-трансляции (room=demo — так же жёстко задано в A-app).
+  String get viewerUrl {
+    var base = server.trim();
+    if (base.startsWith('wss://')) {
+      base = 'https://${base.substring(6)}';
+    } else if (base.startsWith('ws://')) {
+      base = 'http://${base.substring(5)}';
+    }
+    return '$base/panel/lowlat.html?room=demo';
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    server = prefs.getString('server') ?? defaultServer;
+    pairId = prefs.getString('pairId') ?? defaultPairId;
+    token = prefs.getString('token') ?? '';
+    selectedDeviceId = prefs.getString('selectedDeviceId');
+    proxyWanted = prefs.getBool('proxyWanted') ?? true;
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('server', server);
+    await prefs.setString('pairId', pairId);
+    await prefs.setString('token', token);
+    await prefs.setBool('proxyWanted', proxyWanted);
+    final id = selectedDeviceId;
+    if (id != null) {
+      await prefs.setString('selectedDeviceId', id);
+    } else {
+      await prefs.remove('selectedDeviceId');
+    }
+  }
+
+  Future<void> saveChannel({required String server, required String pairId, required String token}) async {
+    this.server = server;
+    this.pairId = pairId;
+    this.token = token;
+    await _saveSettings();
+  }
+}
+
+/// Första skärmen: listan över tillgängliga enheter.
+class DeviceListPage extends StatefulWidget {
+  const DeviceListPage({super.key});
+
+  @override
+  State<DeviceListPage> createState() => _DeviceListPageState();
+}
+
+class _DeviceListPageState extends State<DeviceListPage> {
+  late final LinkBridge client;
+
+  @override
+  void initState() {
+    super.initState();
+    client = LinkBridge();
+    client.init();
+  }
+
+  @override
+  void dispose() {
+    client.dispose();
+    super.dispose();
   }
 
   void _openSettings() {
@@ -289,10 +307,11 @@ class _HomePageState extends State<HomePage> {
         actions: [
           TextButton(
             onPressed: () {
-              client.server = server.text.trim();
-              client.pairId = pairId.text.trim();
-              client.token = token.text.trim();
-              _saveSettings();
+              client.saveChannel(
+                server: server.text.trim(),
+                pairId: pairId.text.trim(),
+                token: token.text.trim(),
+              );
               client.connect();
               Navigator.of(ctx).pop();
             },
@@ -303,29 +322,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  @override
-  void dispose() {
-    client.dispose();
-    super.dispose();
+  Future<void> _openDevice(Device device) async {
+    await client.selectDevice(device);
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => DevicePage(client: client, device: device)),
+    );
+    // Назад к списку — обновить: онлайн-статусы могли измениться.
+    await client.loadDevices();
   }
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (client.stage) {
-      SignStage.idle => ('', Colors.grey),
-      SignStage.sent => ('Skickat till enheten…', Colors.orange),
-      SignStage.opened => ('BankID är öppet, koden anges…', Colors.orange),
-      SignStage.signing => ('Signering pågår…', Colors.orange),
-      SignStage.signed => ('Klart – gå tillbaka till Swedbank', Colors.green),
-      SignStage.failed => ('Fel: ${client.lastError}', Colors.red),
-    };
-    final selected = client.devices.firstWhere(
-      (d) => d.deviceId == _selectedDeviceId,
-      orElse: () => Device(deviceId: '', pairId: ''),
-    );
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pult – Kontroll'),
+        title: const Text('Enheter'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: () => client.loadDevices()),
           IconButton(icon: const Icon(Icons.settings), onPressed: _openSettings),
@@ -333,61 +344,205 @@ class _HomePageState extends State<HomePage> {
       ),
       body: RefreshIndicator(
         onRefresh: client.loadDevices,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _statusCard(),
-            const SizedBox(height: 16),
-            if (label.isNotEmpty) _signStatusCard(label, color),
-            const SizedBox(height: 16),
-            Text('Enheter i Sverige', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            if (client.devices.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('Inga anslutna enheter. Kontrollera kanalen och uppdatera listan.'),
-                ),
-              )
-            else
-              ...client.devices.map((d) => _deviceTile(d)),
-            const SizedBox(height: 16),
-            if (selected.deviceId.isNotEmpty) _selectedDeviceCard(selected),
-            const SizedBox(height: 16),
-            if (_ipTestResult.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(_ipTestResult, textAlign: TextAlign.center),
-              ),
-          ],
+        child: ListenableBuilder(
+          listenable: client,
+          builder: (context, _) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              if (!client.online) _offlineBanner(),
+              if (client.devices.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Inga anslutna enheter. Kontrollera kanalen och uppdatera listan.'),
+                  ),
+                )
+              else
+                ...client.devices.map(_deviceTile),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _statusCard() => Card(
+  Widget _offlineBanner() => Card(
+        color: Colors.red.withOpacity(0.15),
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.link_off, color: Colors.red),
+              const SizedBox(width: 12),
+              const Expanded(child: Text('Kanalen är inte ansluten')),
+              TextButton(onPressed: client.connect, child: const Text('Anslut')),
+            ],
+          ),
+        ),
+      );
+
+  Widget _deviceTile(Device device) {
+    final selected = client.selectedDeviceId == device.deviceId;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: Icon(
+          device.online ? Icons.phone_android : Icons.phone_android_outlined,
+          color: device.online ? Colors.green : Colors.grey,
+        ),
+        title: Text(device.displayName),
+        subtitle: Text(device.subtitle),
+        trailing: selected
+            ? const Icon(Icons.check_circle, color: Colors.green)
+            : const Icon(Icons.chevron_right),
+        onTap: device.online ? () => _openDevice(device) : null,
+      ),
+    );
+  }
+}
+
+/// Styrsidan för en vald enhet: delad skärm, tunnel, signeringsstatus.
+class DevicePage extends StatefulWidget {
+  const DevicePage({super.key, required this.client, required this.device});
+
+  final LinkBridge client;
+  final Device device;
+
+  @override
+  State<DevicePage> createState() => _DevicePageState();
+}
+
+class _DevicePageState extends State<DevicePage> {
+  bool _screencastOn = false;
+  String _ipTestResult = '';
+  bool _busy = false;
+
+  LinkBridge get client => widget.client;
+
+  Future<void> _toggleScreencast() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final on = !_screencastOn;
+    final ok = await client.sendScreencast(on);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kunde inte skicka skärmdelningskommandot')),
+      );
+      return;
+    }
+    setState(() => _screencastOn = on);
+    if (on) {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => ScreencastPage(url: client.viewerUrl)),
+      );
+    }
+  }
+
+  Future<void> _toggleTunnel() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await client.toggleProxy(!client.proxyOn);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Kunde inte ändra proxyn: $e')),
+        );
+      }
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _testIp() async {
+    setState(() => _ipTestResult = 'Kontrollerar…');
+    final result = await client.testPublicIp();
+    if (mounted) setState(() => _ipTestResult = result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.device.displayName)),
+      body: ListenableBuilder(
+        listenable: client,
+        builder: (context, _) {
+          final (label, color) = switch (client.stage) {
+            SignStage.idle => ('', Colors.grey),
+            SignStage.sent => ('Skickat till enheten…', Colors.orange),
+            SignStage.opened => ('BankID är öppet, koden anges…', Colors.orange),
+            SignStage.signing => ('Signering pågår…', Colors.orange),
+            SignStage.signed => ('Klart – gå tillbaka till Swedbank', Colors.green),
+            SignStage.failed => ('Fel: ${client.lastError}', Colors.red),
+          };
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _header(),
+              if (label.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _signStatusCard(label, color),
+              ],
+              const SizedBox(height: 24),
+              _bigButton(
+                icon: _screencastOn ? Icons.stop_screen_share : Icons.screen_share,
+                label: _screencastOn ? 'Stoppa skärmdelning' : 'Dela skärm',
+                color: _screencastOn ? Colors.red : null,
+                onPressed: _toggleScreencast,
+              ),
+              const SizedBox(height: 12),
+              _bigButton(
+                icon: client.proxyOn ? Icons.stop : Icons.vpn_key,
+                label: client.proxyOn
+                    ? 'Tunnel påslagen (${client.tunnelStreams} strömmar) – stoppa'
+                    : 'Skicka all trafik via ${widget.device.displayName}',
+                color: client.proxyOn ? Colors.green : null,
+                onPressed: client.tunnelOnline || client.proxyOn ? _toggleTunnel : null,
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: _testIp,
+                  child: const Text('Kontrollera publik IP'),
+                ),
+              ),
+              if (_ipTestResult.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(_ipTestResult, textAlign: TextAlign.center),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _header() => Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
               Icon(
-                client.online ? Icons.link : Icons.link_off,
+                widget.device.online ? Icons.phone_android : Icons.phone_android_outlined,
                 size: 40,
-                color: client.online ? Colors.green : Colors.red,
+                color: widget.device.online ? Colors.green : Colors.grey,
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(widget.device.displayName, style: const TextStyle(fontSize: 18)),
                     Text(
-                      client.online ? 'Kanal till servern: ansluten' : 'Kanalen är inte ansluten',
-                      style: const TextStyle(fontSize: 16),
+                      widget.device.subtitle,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
                     ),
                     Text(
-                      client.tunnelOnline
-                          ? 'Tunneln är aktiv (${client.tunnelStreams} strömmar)'
-                          : 'Tunneln är inte uppe',
+                      client.tunnelOnline ? 'Tunnelkanalen är uppe' : 'Tunnelkanalen är inte uppe',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
                     ),
                   ],
@@ -415,58 +570,22 @@ class _HomePageState extends State<HomePage> {
         ),
       );
 
-  Widget _deviceTile(Device device) => Card(
-        margin: const EdgeInsets.only(bottom: 8),
-        child: ListTile(
-          leading: Icon(
-            device.online ? Icons.phone_android : Icons.phone_android_outlined,
-            color: device.online ? Colors.green : Colors.grey,
-          ),
-          title: Text(device.displayName),
-          subtitle: Text(device.subtitle),
-          trailing: _selectedDeviceId == device.deviceId
-              ? const Icon(Icons.check_circle, color: Colors.green)
-              : TextButton(
-                  onPressed: () => _selectDevice(device),
-                  child: const Text('Välj'),
-                ),
-        ),
-      );
-
-  Widget _selectedDeviceCard(Device device) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Aktiv enhet', style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
-              const SizedBox(height: 4),
-              Text(device.displayName, style: const TextStyle(fontSize: 18)),
-              Text(device.subtitle, style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => _toggleProxy(!_proxyOn),
-                      icon: Icon(_proxyOn ? Icons.stop : Icons.vpn_key),
-                      label: Text(_proxyOn
-                          ? 'All trafik går via ${device.displayName}'
-                          : 'Skicka all trafik via ${device.displayName}'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: _testPublicIp,
-                  child: const Text('Kontrollera publik IP'),
-                ),
-              ),
-            ],
-          ),
+  Widget _bigButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+    Color? color,
+  }) =>
+      SizedBox(
+        width: double.infinity,
+        height: 56,
+        child: ElevatedButton.icon(
+          onPressed: _busy ? null : onPressed,
+          icon: Icon(icon, color: color),
+          label: Text(label),
+          style: color != null
+              ? ElevatedButton.styleFrom(foregroundColor: color)
+              : null,
         ),
       );
 }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
@@ -26,7 +27,11 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState)
         KeepAliveService.start(this)
         handleBankIdIntent(intent)
-        registerReceiver(statusReceiver, IntentFilter(KeepAliveService.ACTION_STATUS))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(statusReceiver, IntentFilter(KeepAliveService.ACTION_STATUS), Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(statusReceiver, IntentFilter(KeepAliveService.ACTION_STATUS))
+        }
     }
 
     override fun onDestroy() {
@@ -86,10 +91,12 @@ class MainActivity : FlutterActivity() {
                 "getProxy" -> result.success(
                     Settings.Global.getString(contentResolver, Settings.Global.HTTP_PROXY),
                 )
-                // Список A-app устройств с сервера.
+                // Список A-app устройств с сервера. Сеть — только не на UI-потоке.
                 "getDevices" -> {
-                    val array = KeepAliveService.fetchDevices(this)
-                    result.success(array.toString())
+                    Thread {
+                        val array = KeepAliveService.fetchDevices(this)
+                        runOnUiThread { result.success(array.toString()) }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }

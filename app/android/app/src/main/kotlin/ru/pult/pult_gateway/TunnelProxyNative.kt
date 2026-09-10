@@ -42,7 +42,10 @@ class TunnelProxyNative(private val context: Context) {
     private val prefs: SharedPreferences
         get() = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
 
+    // Сигналинг идёт напрямую, не через системный прокси (туннель): иначе при
+    // падении туннеля переподключение пошло бы через мёртвый прокси — deadlock.
     private val http = OkHttpClient.Builder()
+        .proxy(java.net.Proxy.NO_PROXY)
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
     private val io = Executors.newCachedThreadPool()
@@ -116,24 +119,70 @@ class TunnelProxyNative(private val context: Context) {
                 if (n >= header.size) { client.close(); return } // заголовок не влез — мусор
             }
             val request = String(header, 0, headerEnd, Charsets.UTF_8)
-            val match = Regex("^CONNECT ([^:\\s]+):(\\d+) HTTP").find(request.lineSequence().first())
-            if (match == null || !online) {
-                // Туннель не поднят — честный отказ, а не чёрная дыра.
-                client.getOutputStream().write(
-                    "HTTP/1.1 ${if (online) "405" else "503"}\r\nContent-Length: 0\r\n\r\n"
-                        .toByteArray(),
-                )
+            val firstLine = request.lineSequence().first()
+            val pipelined = if (n > headerEnd) header.copyOfRange(headerEnd, n) else null
+
+            // CONNECT host:port (HTTPS и прочий TCP через прокси).
+            val connect = Regex("^CONNECT ([^:\\s]+):(\\d+) HTTP").find(firstLine)
+            // Абсолютный URI (проксируемый plain HTTP — WebView/браузер на http://).
+            val plain = Regex("^([A-Z]+) http://([^/\\s:]+)(?::(\\d+))?(\\S*) HTTP").find(firstLine)
+
+            if (connect == null && plain == null) {
+                client.getOutputStream().write("HTTP/1.1 405\r\nContent-Length: 0\r\n\r\n".toByteArray())
                 client.close()
                 return
             }
-            streamId = nextStreamId++
-            clients[streamId] = client
-            publish()
-            send(streamId, OP_OPEN, "${match.groupValues[1]}:${match.groupValues[2]}".toByteArray())
-            // Оптимистичное 200 — как в Dart-версии: при недоступности цели придёт opError.
-            client.getOutputStream().write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())
-            // Байты, приехавшие вместе с заголовком (пайплайнинг), не теряем.
-            if (n > headerEnd) send(streamId, OP_DATA, header.copyOfRange(headerEnd, n))
+
+            if (connect != null) {
+                val host = connect.groupValues[1]
+                val port = connect.groupValues[2].toIntOrNull() ?: 443
+                // Управляющий трафик к сигналингу (API устройств, lowlat-страница, /link)
+                // не должен уходить в туннель: цель живёт рядом с B-app, а не с A-app.
+                if (isDirectTarget(host)) {
+                    relayDirect(
+                        client, host, port,
+                        clientPrefix = "HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(),
+                        upstreamPrefix = pipelined,
+                    )
+                    return
+                }
+                if (!online) {
+                    // Туннель не поднят — честный отказ, а не чёрная дыра.
+                    client.getOutputStream().write("HTTP/1.1 503\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                    client.close()
+                    return
+                }
+                streamId = nextStreamId++
+                clients[streamId] = client
+                publish()
+                send(streamId, OP_OPEN, "$host:$port".toByteArray())
+                // Оптимистичное 200 — как в Dart-версии: при недоступности цели придёт opError.
+                client.getOutputStream().write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray())
+                // Байты, приехавшие вместе с заголовком (пайплайнинг), не теряем.
+                if (pipelined != null) send(streamId, OP_DATA, pipelined)
+            } else {
+                val p = plain!!
+                val host = p.groupValues[2]
+                val port = p.groupValues[3].toIntOrNull() ?: 80
+                val path = p.groupValues[4].ifEmpty { "/" }
+                // Цели — origin-form: "GET /path HTTP/1.1" + заголовки без изменений.
+                val rewritten = "${p.groupValues[1]} $path HTTP/1.1${request.substring(firstLine.length)}"
+                    .toByteArray() + (pipelined ?: ByteArray(0))
+                if (isDirectTarget(host)) {
+                    relayDirect(client, host, port, clientPrefix = null, upstreamPrefix = rewritten)
+                    return
+                }
+                if (!online) {
+                    client.getOutputStream().write("HTTP/1.1 503\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                    client.close()
+                    return
+                }
+                streamId = nextStreamId++
+                clients[streamId] = client
+                publish()
+                send(streamId, OP_OPEN, "$host:$port".toByteArray())
+                send(streamId, OP_DATA, rewritten)
+            }
 
             val buf = ByteArray(16 * 1024)
             while (true) {
@@ -162,6 +211,69 @@ class TunnelProxyNative(private val context: Context) {
             i++
         }
         return -1
+    }
+
+    // ── Прямой обход туннеля для сигналинг-сервера ──────────────────────────
+
+    private fun isDirectTarget(host: String): Boolean {
+        if (host.equals("localhost", ignoreCase = true) || host == "127.0.0.1" ||
+            host == "::1" || host == "10.0.2.2"
+        ) return true
+        val server = prefs.getString("flutter.server", null) ?: return false
+        val serverHost = runCatching { java.net.URI(server).host }.getOrNull()
+        return serverHost != null && serverHost.equals(host, ignoreCase = true)
+    }
+
+    /**
+     * Прямое соединение в обход туннеля. [clientPrefix] уходит клиенту сразу после
+     * подключения (ответ на CONNECT), [upstreamPrefix] — цели первым делом
+     * (пайплайн после CONNECT-заголовка или переписанный plain-HTTP запрос).
+     */
+    private fun relayDirect(
+        client: Socket,
+        host: String,
+        port: Int,
+        clientPrefix: ByteArray?,
+        upstreamPrefix: ByteArray?,
+    ) {
+        val upstream = Socket()
+        try {
+            upstream.tcpNoDelay = true
+            upstream.connect(InetSocketAddress(host, port), 10_000)
+            if (clientPrefix != null) client.getOutputStream().write(clientPrefix)
+            if (upstreamPrefix != null) {
+                upstream.getOutputStream().write(upstreamPrefix)
+                upstream.getOutputStream().flush()
+            }
+            io.execute {
+                runCatching {
+                    val buf = ByteArray(16 * 1024)
+                    while (true) {
+                        val read = upstream.getInputStream().read(buf)
+                        if (read < 0) break
+                        client.getOutputStream().write(buf, 0, read)
+                        client.getOutputStream().flush()
+                    }
+                }
+                runCatching { client.close() }
+                runCatching { upstream.close() }
+            }
+            val buf = ByteArray(16 * 1024)
+            while (true) {
+                val read = client.getInputStream().read(buf)
+                if (read < 0) break
+                upstream.getOutputStream().write(buf, 0, read)
+                upstream.getOutputStream().flush()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "direct relay to $host:$port failed: ${e.message}")
+            runCatching {
+                client.getOutputStream().write("HTTP/1.1 502\r\nContent-Length: 0\r\n\r\n".toByteArray())
+            }
+        } finally {
+            runCatching { client.close() }
+            runCatching { upstream.close() }
+        }
     }
 
     // ── WS к серверу ────────────────────────────────────────────────────────

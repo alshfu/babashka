@@ -40,7 +40,9 @@ import java.util.concurrent.TimeUnit
 class KeepAliveService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
+    // Канал /link — напрямую, без системного прокси (см. TunnelProxyNative).
     private val http = OkHttpClient.Builder()
+        .proxy(java.net.Proxy.NO_PROXY)
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
@@ -231,11 +233,18 @@ class KeepAliveService : Service() {
             val server = prefs.getString("flutter.server", null) ?: return JSONArray()
             val token = prefs.getString("flutter.token", null) ?: return JSONArray()
             val pairId = prefs.getString("flutter.pairId", null) ?: return JSONArray()
+            val base = when {
+                server.startsWith("wss://") -> "https://" + server.removePrefix("wss://")
+                server.startsWith("ws://") -> "http://" + server.removePrefix("ws://")
+                else -> server
+            }
+            // Менеджмент-запрос к сигналингу идёт напрямую, не через туннельный прокси.
             val http = OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
                 .pingInterval(20, TimeUnit.SECONDS)
                 .build()
             val request = Request.Builder()
-                .url("$server/api/devices?pairId=$pairId")
+                .url("$base/api/devices?pairId=$pairId")
                 .header("x-agent-token", token)
                 .build()
             return try {
