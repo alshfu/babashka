@@ -95,6 +95,25 @@ https://85.190.98.57.sslip.io:8445/panel/b-app.apk   (B-app, operatör)
 https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
 ```
 
+### Driftstatus (2026-09-10)
+
+- Båda APK:erna på VPS:en är byggda från senaste `main` (B-app med ny
+  styr-UI: enhetslista → delad skärm/tunnel/publik IP; A-app med VPS-adress
+  och token inbakade). SHA256 verifierat mot lokala byggen.
+- **Aktuell par på VPS:en:** pairId `Dl8YrhLu00VwOz62sQr4gw`
+  (Redmi ↔ Note 10 + emulator). B-app-inställningar (⚙): server
+  `wss://85.190.98.57.sslip.io:8445`, kanaltoken = AGENT_TOKEN (nedan).
+- **AGENT_TOKEN** finns i `/etc/systemd/system/pult.service` på VPS:en
+  (skrivs inte i repot). SSH: `administrator@85.190.98.57` (lösenord hos
+  ägaren). Tjänsten: `systemctl status pult`, loggar `journalctl -u pult`.
+- A-app byggs för VPS med miljövariabler:
+  `SIGNALING_URL=wss://85.190.98.57.sslip.io:8445/ws TUNNEL_TOKEN=<AGENT_TOKEN> UPDATE_TOKEN=<AGENT_TOKEN> ./gradlew :grandma:assembleV2Debug`
+- Installation på Redmi utan USB: `node scripts/phone-push-apk.mjs <apk> 192.168.3.111 se.pult.app`
+  (via LanAgent, TCP 47201), därefter MIUI-rättigheterna i §6.
+- **EJ GJORT:** E2E-test av BankID-inlogg efter ominstallationen av A-appen
+  på Redmi — måste köras (Swedbank → Logga in → saldo syns) innan systemet
+  används mot riktiga tjänster. Se §7.
+
 ---
 
 ## 6. Drift

@@ -80,7 +80,12 @@ android {
         debug {
             // Эмулятор видит хост как 10.0.2.2. Открытый ws:// допустим только в отладке —
             // в релизе остаётся wss://, иначе сигналинг можно слушать по дороге.
-            buildConfigField("String", "DEFAULT_SIGNALING_URL", "\"ws://10.0.2.2:8080/ws\"")
+            // Адрес можно переопределить окружением SIGNALING_URL (стенд/VPS).
+            buildConfigField(
+                "String",
+                "DEFAULT_SIGNALING_URL",
+                "\"${System.getenv("SIGNALING_URL") ?: "ws://10.0.2.2:8080/ws"}\"",
+            )
         }
 
         release {
