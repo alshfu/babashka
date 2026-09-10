@@ -95,11 +95,20 @@ https://85.190.98.57.sslip.io:8445/panel/b-app.apk   (B-app, operatör)
 https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
 ```
 
-### Driftstatus (2026-09-10)
+### Driftstatus (2026-09-11)
 
 - Båda APK:erna på VPS:en är byggda från senaste `main` (B-app med ny
   styr-UI: enhetslista → delad skärm/tunnel/publik IP; A-app med VPS-adress
   och token inbakade). SHA256 verifierat mot lokala byggen.
+- **ANR-fix på Redmi (2026-09-11):** `onDeeplink` i PultService körs nu på
+  bakgrundstråd (commit `6b8e945`). Orsak: `latch.await()` på main-tråden →
+  «Pult svarar inte» i loop när bankid://-deeplink levererades från VPS-kön.
+  Fixad APK (sha256 `83e3d004…c5`) installerad på Redmi via
+  `phone-push-apk.mjs`; MIUI-rättigheter återställda (§6); inga nya ANR i
+  dropbox efter 23:37. **BankID-PIN är inlagd i PinStorage** på Redmi.
+- Skärmdump av Redmi på PC:en: öppna
+  `https://85.190.98.57.sslip.io:8445/panel/lowlat.html?room=demo` i
+  webbläsaren (ström startas från B-appens «Dela skärm»).
 - **Note 10 kör nya B-appen** (installerad 2026-09-10, byter ut gamla
   gateway-APK:n; inställningar och PIN:er behölls). **E2E-test av
   BankID-inlogg krävs innan Swedbank används** — se §7.
@@ -113,9 +122,10 @@ https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
   `SIGNALING_URL=wss://85.190.98.57.sslip.io:8445/ws TUNNEL_TOKEN=<AGENT_TOKEN> UPDATE_TOKEN=<AGENT_TOKEN> ./gradlew :grandma:assembleV2Debug`
 - Installation på Redmi utan USB: `node scripts/phone-push-apk.mjs <apk> 192.168.3.111 se.pult.app`
   (via LanAgent, TCP 47201), därefter MIUI-rättigheterna i §6.
-- **EJ GJORT:** E2E-test av BankID-inlogg efter ominstallationen av A-appen
-  på Redmi — måste köras (Swedbank → Logga in → saldo syns) innan systemet
-  används mot riktiga tjänster. Se §7.
+- **EJ GJORT:** E2E-test av BankID-inlogg efter ANR-fixen — allt är förberett
+  (PIN lagrad, rättigheter satta, Swedbank öppen på Note 10 vid
+  inloggningsskärmen) men testet kräver ägarens personnummer för att starta
+  BankID-ordern. Swedbank → Logga in → saldo syns, se §7.
 
 ---
 
