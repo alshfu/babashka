@@ -67,6 +67,9 @@ Swedbank → tap «Logga in»
   (PIN-сценарий), `BankIdPinActivity` (единственный UI для первого ввода PIN), LanShell,
   AdbShell (fallback), RemoteControlService (a11y — только НЕ в момент BankID).
   PIN хранится **только здесь**, локально и криптованно (`PinStorage`).
+  Удалённое управление через lowlat-страницу: LowLatService диспатчит tap/swipe/nav
+  **в LanAgent (injectInputEvent), а НЕ в a11y** — сторонние касания во время
+  `BankIdAgent.flowActive` игнорируются (не ломать вход).
 - `scripts/android-agent/lanagent.dex` — LanAgent: app_process+shell, TCP 47201 (команды)
   / 47202 (relay→scrcpy localabstract). Запуск: `setsid sh -c 'CLASSPATH=/data/local/tmp/lanagent.dex
   app_process / LanAgent 47201 </dev/null >/sdcard/lanagent.log 2>&1 &'`.

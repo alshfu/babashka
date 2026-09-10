@@ -8,6 +8,9 @@
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const room = params.get('room') || 'demo';
+// Токен пары: нужен релею, чтобы принимать от этой панели команды управления
+// (тап/свайп/навигация). Без токена страница смотрит, но не управляет.
+const token = params.get('token') || '';
 
 const canvas = $('screen');
 // desynchronized: просим низколатентный путь отрисовки (меньше буферизации композитора).
@@ -117,7 +120,7 @@ function onEncoded(type, pts, payload) {
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 
-const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/lowlat?room=${encodeURIComponent(room)}&role=panel`;
+const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/lowlat?room=${encodeURIComponent(room)}&role=panel&token=${encodeURIComponent(token)}`;
 let ws = null;
 
 function connect() {

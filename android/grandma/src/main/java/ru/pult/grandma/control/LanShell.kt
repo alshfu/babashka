@@ -47,6 +47,27 @@ object LanShell {
         }
     }.onFailure { Log.w(TAG, "relay connect: ${it.message}") }.getOrNull()
 
+    // ── Пультовые команды (lowlat): тап/свайп/навигация через injectInputEvent ──
+    // Координаты — доли экрана 0..1 (LanAgent сам умножает на реальное разрешение).
+    // Именно этот путь (shell UID 2000 + SOURCE_TOUCHSCREEN), а не accessibility:
+    // на устройстве не должно быть включённых a11y-служб — BankID их детектирует.
+
+    /** Тап в долях экрана. true — ушло в LanAgent. */
+    fun tap(fx: Double, fy: Double): Boolean =
+        request(JSONObject().put("t", "tap").put("x", fx).put("y", fy), 5_000)?.optBoolean("ok") == true
+
+    /** Свайп в долях экрана. */
+    fun swipe(fx1: Double, fy1: Double, fx2: Double, fy2: Double, ms: Long): Boolean =
+        request(
+            JSONObject().put("t", "swipe")
+                .put("x1", fx1).put("y1", fy1).put("x2", fx2).put("y2", fy2).put("ms", ms),
+            5_000,
+        )?.optBoolean("ok") == true
+
+    /** Навигация: back | home | recents. */
+    fun nav(action: String): Boolean =
+        request(JSONObject().put("t", "nav").put("action", action), 5_000)?.optBoolean("ok") == true
+
     private fun request(msg: JSONObject, timeoutMs: Long): JSONObject? = runCatching {
         Socket().use { s ->
             s.connect(InetSocketAddress(HOST, PORT_CMD), 3_000)

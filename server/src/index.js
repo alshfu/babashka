@@ -87,7 +87,9 @@ export async function createApp(overrides = {}) {
   };
 
   // Прототип низколатентной трансляции (H.264 по WebSocket) — общий на оба листенера.
-  const lowlatWss = createLowLatencyWss();
+  // Токен нужен релею, чтобы пускать команды управления (тап/свайп/навигация)
+  // только от панелей с токеном пары — сама трансляция открыта как раньше.
+  const lowlatWss = createLowLatencyWss({ agentToken: config.agentToken });
 
   // Маршрутизация апгрейдов вручную (noServer): на одном http-сервере живут два WSS —
   // `/ws` (сигналинг) и `/lowlat` (прототип). Если оба вешать через {server, path}, они

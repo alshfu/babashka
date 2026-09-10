@@ -26,7 +26,7 @@ const FRAME_CONFIG = 0;
 const FRAME_KEY = 1;
 const FRAME_DELTA = 2;
 
-export function createLowLatencyWss() {
+export function createLowLatencyWss({ agentToken } = {}) {
   // Комната = до двух сокетов. Первый ключ — идентификатор комнаты из query.
   const rooms = new Map();
   // Последние config + keyframe по комнате: отдаём их панели сразу при входе.
@@ -43,6 +43,10 @@ export function createLowLatencyWss() {
       const url = new URL(request.url, 'http://x');
       const room = url.searchParams.get('room') || 'demo';
       const role = url.searchParams.get('role') || 'peer';
+      // Токен панели: просмотр открыт как раньше, но команды управления
+      // (тап/свайп/навигация) релей пропускает только с токеном пары —
+      // иначе любой, кто угадал имя комнаты, получил бы пульт над телефоном.
+      const token = url.searchParams.get('token') || '';
 
       let peers = rooms.get(room);
       if (!peers) {
@@ -51,6 +55,7 @@ export function createLowLatencyWss() {
       }
       peers.add(socket);
       socket._lowlatRole = role;
+      socket._lowlatToken = token;
       log.info('lowlat: join', { room, role, size: peers.size });
 
       // Поздний зритель: мгновенно отдаём последние config+keyframe из кэша.
@@ -67,6 +72,17 @@ export function createLowLatencyWss() {
       // Пересылаем всё, что прислали, ДРУГИМ участникам комнаты — как есть (бинарь остаётся
       // бинарём, иначе H.264 испортится при перекодировке в utf8).
       socket.on('message', (data, isBinary) => {
+        // Команды управления от панели — только с токеном пары. Без токена
+        // сокет может смотреть трансляцию, но пультом не является.
+        if (!isBinary && socket._lowlatRole !== 'device' && agentToken) {
+          const controlActions = { tap: 1, swipe: 1, nav: 1 };
+          let action = null;
+          try { action = JSON.parse(data.toString('utf8'))?.t; } catch { /* не JSON — релей как есть */ }
+          if (action && controlActions[action] && socket._lowlatToken !== agentToken) {
+            log.warn('lowlat: control rejected (no token)', { room, action });
+            return;
+          }
+        }
         // Кэшируем config/keyframe от устройства для поздних зрителей.
         if (isBinary && socket._lowlatRole === 'device' && data[0] !== FRAME_DELTA) {
           const cached = lastFrames.get(room) ?? { config: null, key: null };

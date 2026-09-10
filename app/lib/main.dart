@@ -219,6 +219,8 @@ class LinkBridge extends ChangeNotifier {
   }
 
   /// Страница просмотра lowlat-трансляции (room=demo — так же жёстко задано в A-app).
+  /// Токен пары передаём странице: релей принимает команды управления (тап/свайп)
+  /// только от панелей с токеном — без него страница только смотрит.
   String get viewerUrl {
     var base = server.trim();
     if (base.startsWith('wss://')) {
@@ -226,7 +228,7 @@ class LinkBridge extends ChangeNotifier {
     } else if (base.startsWith('ws://')) {
       base = 'http://${base.substring(5)}';
     }
-    return '$base/panel/lowlat.html?room=demo';
+    return '$base/panel/lowlat.html?room=demo&token=${Uri.encodeQueryComponent(token)}';
   }
 
   Future<void> _loadSettings() async {

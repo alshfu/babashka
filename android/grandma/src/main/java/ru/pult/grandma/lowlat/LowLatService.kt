@@ -9,6 +9,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.IBinder
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
@@ -16,7 +17,8 @@ import ru.pult.core.lowlat.LowLatencyStreamer
 import ru.pult.core.webrtc.WebRtcCore
 import ru.pult.grandma.BuildConfig
 import ru.pult.grandma.PultApp
-import ru.pult.grandma.control.RemoteControlService
+import ru.pult.grandma.control.BankIdAgent
+import ru.pult.grandma.control.LanShell
 
 /**
  * Прототип низколатентной трансляции (H.264 по WebSocket) — отдельный foreground-сервис
@@ -57,7 +59,7 @@ class LowLatService : Service() {
             projection = projection,
             width = w, height = h, densityDpi = dpi,
             wsUrl = intent?.getStringExtra(EXTRA_URL)?.takeIf { it.isNotBlank() } ?: lowLatUrl(),
-            onCommand = { text -> dispatch(text, w, h) },
+            onCommand = { text -> dispatch(text) },
             bitrate = (intent?.getIntExtra(EXTRA_BITRATE, 0) ?: 0).takeIf { it > 0 }
                 ?: LowLatencyStreamer.DEFAULT_BITRATE,
             fps = (intent?.getIntExtra(EXTRA_FPS, 0) ?: 0).takeIf { it > 0 }
@@ -67,18 +69,28 @@ class LowLatService : Service() {
         return START_NOT_STICKY
     }
 
-    /** Команда панели → служба управления. Координаты приходят в долях кадра. */
-    private fun dispatch(text: String, w: Int, h: Int) {
-        val svc = RemoteControlService.instance ?: return
+    /**
+     * Команда панели → LanAgent (shell, injectInputEvent). Координаты приходят
+     * в долях кадра — они же доли реального экрана, передаём как есть.
+     * Пока BankIdAgent гоняет вход BankID, команды глушим: касание в этот
+     * момент убивает заказ. Accessibility-службу (RemoteControlService) для
+     * этого пути не используем: она должна быть ВЫКЛЮЧЕНА, иначе BankID
+     * детектирует её и ломает вход.
+     */
+    private fun dispatch(text: String) {
+        if (BankIdAgent.flowActive) {
+            Log.i(TAG, "control ignored: BankID flow active")
+            return
+        }
         val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
         when (msg.optString("t")) {
-            "tap" -> svc.tap(msg.optDouble("x").toFloat() * w, msg.optDouble("y").toFloat() * h)
-            "swipe" -> svc.swipe(
-                msg.optDouble("x1").toFloat() * w, msg.optDouble("y1").toFloat() * h,
-                msg.optDouble("x2").toFloat() * w, msg.optDouble("y2").toFloat() * h,
+            "tap" -> LanShell.tap(msg.optDouble("x"), msg.optDouble("y"))
+            "swipe" -> LanShell.swipe(
+                msg.optDouble("x1"), msg.optDouble("y1"),
+                msg.optDouble("x2"), msg.optDouble("y2"),
                 msg.optLong("ms", 300),
             )
-            "nav" -> svc.nav(msg.optString("action"))
+            "nav" -> LanShell.nav(msg.optString("action"))
         }
     }
 
@@ -108,6 +120,7 @@ class LowLatService : Service() {
             .build()
 
     companion object {
+        private const val TAG = "PultLowLat"
         private const val NOTIF_ID = 42
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"

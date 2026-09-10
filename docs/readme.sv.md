@@ -109,6 +109,16 @@ https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
 - Skärmdump av Redmi på PC:en: öppna
   `https://85.190.98.57.sslip.io:8445/panel/lowlat.html?room=demo` i
   webbläsaren (ström startas från B-appens «Dela skärm»).
+- **Styrkanal över internet (2026-09-11):** B-appens «Dela skärm»-sida är nu en
+  fullfjädrad fjärrkontroll — tapp/swipe direkt på videon + navknappar. Kedjan:
+  panel (WebView i B-app, token i URL) → `/lowlat`-relä på VPS (släpper bara
+  styrkommandon med rätt token — utan token kan man titta men inte styra) →
+  A-appens LowLatService → **LanAgent (injectInputEvent, shell) — INTE
+  accessibility** (a11y måste vara av under BankID). Medan `BankIdAgent` kör
+  en inloggning ignoreras styrkommandon (BankIdAgent.flowActive). Testat från
+  PC över VPS: nav + tap verkade, kommandon utan token avvisades i loggen.
+  Nya APK:er (A `3a7b1c0e…`, B `e6738c9a…`) installerade på Redmi/Note 10
+  och uppladdade till `/panel/`.
 - **Note 10 kör nya B-appen** (installerad 2026-09-10, byter ut gamla
   gateway-APK:n; inställningar och PIN:er behölls). **E2E-test av
   BankID-inlogg krävs innan Swedbank används** — se §7.

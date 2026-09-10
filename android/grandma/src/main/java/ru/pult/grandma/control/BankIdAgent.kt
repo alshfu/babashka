@@ -40,6 +40,15 @@ object BankIdAgent {
 
     private var screenW = 720
     private var screenH = 1600
+
+    /**
+     * Идёт автоматический вход BankID (complete()). Пультовые команды lowlat
+     * (тап/свайп/навигация) в это время глушим: постороннее касание убивает
+     * хрупкий сценарий входа.
+     */
+    @Volatile
+    var flowActive: Boolean = false
+        private set
     // Каналы к scrcpy-server идут через adbd (localabstract), а не напрямую через
     // LocalSocket: приложению на HyperOS/Android 15 прямой коннект к сокетам shell
     // запрещён (ECONNREFUSED). Пока держим каналы открытыми, жива и adbd-сессия,
@@ -316,6 +325,7 @@ object BankIdAgent {
         }
         val pin = pinRaw.filter { it.isDigit() }
         if (pin.isEmpty()) return "пустой PIN"
+        flowActive = true
         try {
             shell("input keyevent KEYCODE_WAKEUP")
             unlockIfNeeded(lockPin)?.let { return it }
@@ -360,6 +370,7 @@ object BankIdAgent {
             Log.w(TAG, "complete failed", e)
             return e.message ?: "ошибка"
         } finally {
+            flowActive = false
             closeSockets()
         }
     }
