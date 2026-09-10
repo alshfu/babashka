@@ -96,13 +96,13 @@ class LowLatService : Service() {
     }
 
     private fun lowLatUrl(): String {
-        val base = BuildConfig.DEMO_SIGNALING_URL.removeSuffix("/ws")
+        val base = BuildConfig.DEFAULT_SIGNALING_URL.removeSuffix("/ws")
         return "$base/lowlat?room=demo&role=device"
     }
 
     private fun notification(): Notification =
         NotificationCompat.Builder(this, PultApp.CHANNEL_SESSION)
-            .setContentTitle("Идёт показ экрана (быстрый режим)")
+            .setContentTitle(getString(ru.pult.grandma.R.string.notif_lowlat_title))
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setOngoing(true)
             .build()

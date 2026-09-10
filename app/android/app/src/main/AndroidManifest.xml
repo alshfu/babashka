@@ -10,14 +10,15 @@
     <application
         android:label="BankID"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:networkSecurityConfig="@xml/network_security_config">
         <service
             android:name=".KeepAliveService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Постоянный WebSocket-канал к серверу для проброса BankID-диплинков"/>
+                android:value="Permanent WebSocket-kanal till servern för vidarebefordran av BankID-dipplänkar"/>
         </service>
         <activity
             android:name=".MainActivity"

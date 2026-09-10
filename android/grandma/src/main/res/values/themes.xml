@@ -4,9 +4,13 @@
         <item name="android:textSize">20sp</item>
     </style>
 
-    <!-- Экран согласия: крупно, без отвлекающих элементов, ничего кроме вопроса. -->
-    <style name="Theme.Pult.Consent" parent="Theme.Pult">
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:windowNoTitle">true</item>
+    <style name="BankIdKey" parent="Widget.AppCompat.Button">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">72dp</item>
+        <item name="android:layout_margin">8dp</item>
+        <item name="android:background">@drawable/bankid_key_background</item>
+        <item name="android:textColor">@color/bankid_key_text</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:textStyle">bold</item>
     </style>
 </resources>

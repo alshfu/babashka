@@ -37,16 +37,6 @@ class DebugPairReceiver : BroadcastReceiver() {
         // в Wi-Fi он разный, поэтому его можно передать явно.
         val url = intent.getStringExtra("url") ?: BuildConfig.DEFAULT_SIGNALING_URL
 
-        // Отладка турнкей-режима: --ez auto true имитирует настройку «под ключ».
-        // В бою этот флаг ставит мастер настройки / Device Owner, а не broadcast.
-        if (intent.hasExtra("auto")) {
-            context.getSharedPreferences("pult_settings", Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean("auto_accept", intent.getBooleanExtra("auto", false))
-                .apply()
-            Log.i(TAG, "auto_accept = ${intent.getBooleanExtra("auto", false)}")
-        }
-
         EncryptedPairStore(context).save(
             PairRecord(
                 pairId = packet.pairId,

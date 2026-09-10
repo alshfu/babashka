@@ -1,8 +1,7 @@
 package ru.pult.grandma.control
 
-import android.net.LocalSocket
-import android.net.LocalSocketAddress
 import android.util.Log
+import java.net.Socket
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -31,17 +30,23 @@ object BankIdAgent {
         "identifiera" to doubleArrayOf(0.835, 0.898),
     )
 
+    // Без nohup: под adbd-pty nohup пытается создать nohup.out в / (read-only) и умирает,
+    // не запустив сервер. setsid уже отцепляет процесс от сессии — этого достаточно.
     private const val SERVER_CMD =
-        "setsid nohup sh -c 'CLASSPATH=/data/local/tmp/scrcpy-server " +
-            "app_process / com.genymobile.scrcpy.Server 4.0 scid=-1 tunnel_forward=true " +
+        "setsid sh -c 'CLASSPATH=/data/local/tmp/scrcpy-inj.jar " +
+            "app_process / com.genymobile.scrcpy.Server 4.1 scid=-1 tunnel_forward=true " +
             "video=true audio=true control=true cleanup=false log_level=error " +
             "</dev/null >/sdcard/scrcpy-lan.log 2>&1 &'"
 
     private var screenW = 720
     private var screenH = 1600
-    private var videoSocket: LocalSocket? = null
-    private var audioSocket: LocalSocket? = null
-    private var controlSocket: LocalSocket? = null
+    // Каналы к scrcpy-server идут через adbd (localabstract), а не напрямую через
+    // LocalSocket: приложению на HyperOS/Android 15 прямой коннект к сокетам shell
+    // запрещён (ECONNREFUSED). Пока держим каналы открытыми, жива и adbd-сессия,
+    // а значит и заспавненный через неё сервер.
+    private var videoChannel: Socket? = null
+    private var audioChannel: Socket? = null
+    private var controlChannel: Socket? = null
     private var controlOut: OutputStream? = null
 
     // ── shell через наш ADB-клиент ────────────────────────────────────────────
@@ -56,6 +61,7 @@ object BankIdAgent {
      * запускает активити без ограничений BAL.
      */
     fun openDeeplink(url: String): Boolean {
+        Log.i(TAG, "openDeeplink enter at ${System.currentTimeMillis()}")
         val safe = url.replace("'", "")
         val (ok, out) = shell("am start -a android.intent.action.VIEW -d '$safe'")
         val success = ok && !out.contains("Error")
@@ -65,18 +71,33 @@ object BankIdAgent {
 
     // ── Наблюдение за экраном (uiautomator/dumpsys через exec) ───────────────
 
-    /** Тексты с экрана (даже с FLAG_SECURE-окнами — uiautomator их видит). */
+    /** Тексты с экрана (даже с FLAG_SECURE-окнами — uiautomator их видит).
+     *  Фильтрация НА УСТРОЙСТВЕ: LanAgent режет вывод до 2000 символов, а
+     *  полный дамп десятки КБ — cat целиком терял все тексты (xmlLen=2000,
+     *  nodes=0, «экран BankID не найден» 09-09). */
     private fun texts(): List<String> {
-        shell("uiautomator dump /data/local/tmp/ba-ui.xml", 25000)
-        val (_, xml) = shell("cat /data/local/tmp/ba-ui.xml", 10000)
-        return Regex("""text="([^"]+)"""").findAll(xml).map { it.groupValues[1] }
+        val (_, xml) = shell(
+            "uiautomator dump /data/local/tmp/ba-ui.xml >/dev/null; " +
+                "grep -oE 'text=\"[^\"]*\"' /data/local/tmp/ba-ui.xml",
+            25000,
+        )
+        val out = Regex("""text="([^"]+)"""").findAll(xml).map { it.groupValues[1] }
             .filter { it.isNotBlank() }.toList()
+        Log.i(TAG, "texts: xmlLen=${xml.length} nodes=${out.size}")
+        return out
     }
 
     private fun waitText(text: String, timeoutMs: Long): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
+        var probe = 0
         while (System.currentTimeMillis() < deadline) {
-            if (texts().any { it.contains(text, ignoreCase = true) }) return true
+            val t = texts()
+            probe++
+            // Диагностика пустых дампов: без неё «экран не найден» неотличим от слома канала.
+            if (probe <= 2 || probe % 5 == 0) {
+                Log.i(TAG, "waitText[$probe] nodes=${t.size} first=${t.take(3).joinToString("|").take(80)}")
+            }
+            if (t.any { it.contains(text, ignoreCase = true) }) return true
             Thread.sleep(800)
         }
         return false
@@ -91,8 +112,14 @@ object BankIdAgent {
     // ── Экран блокировки ──────────────────────────────────────────────────────
 
     private fun isLocked(): Boolean {
-        val (_, out) = shell("dumpsys deviceidle | grep mScreenLocked")
-        return out.contains("mScreenLocked=true")
+        // mScreenLocked есть не на всех прошивках (на HyperOS его нет — было ложное
+        // «разблокировано», автономный вход умирал под локскрином). Кросс-проверка.
+        val (_, a) = shell("dumpsys deviceidle | grep mScreenLocked")
+        if (a.contains("mScreenLocked=true")) return true
+        val (_, b) = shell("dumpsys trust | grep deviceLocked")
+        if (b.contains("deviceLocked=1")) return true
+        val (_, c) = shell("dumpsys window | grep mDreamingLockscreen")
+        return c.contains("mDreamingLockscreen=true")
     }
 
     /**
@@ -103,11 +130,14 @@ object BankIdAgent {
         if (!isLocked()) return null
         if (lockPin.isEmpty()) return "экран заблокирован, код не задан"
         Log.i(TAG, "locked — unlocking")
-        // Свайп вверх: открыть поле ввода кода.
+        // Свайп вверх: открыть поле ввода кода. Ввод цифрами keyevent'ами —
+        // `input text` на локскрине MIUI требует фокуса поля, которого нет.
         shell("input swipe 360 1200 360 400 250")
         Thread.sleep(1000)
-        shell("input text '${lockPin.replace("'", "")}'")
-        Thread.sleep(500)
+        for (ch in lockPin) {
+            shell("input keyevent KEYCODE_" + ch)
+            Thread.sleep(400)
+        }
         shell("input keyevent 66") // ENTER
         Thread.sleep(1500)
         repeat(3) {
@@ -124,66 +154,112 @@ object BankIdAgent {
         return Regex("^\\s*(\\d+)", RegexOption.MULTILINE).find(out)?.groupValues?.get(1)?.toInt()
     }
 
-    private fun connectChannel(): LocalSocket {
-        val s = LocalSocket()
-        s.connect(LocalSocketAddress("scrcpy", LocalSocketAddress.Namespace.ABSTRACT))
-        return s
+    // Каналы scrcpy-server через LanAgent-релей (TCP 47202 → localabstract):
+    // в отличие от adbd-канала, переживает выключение wireless debugging —
+    // BankID требует её выключенной на всём протяжении входа.
+    private fun connectChannel(): Socket =
+        LanShell.openScrcpyChannel()
+            ?: throw IllegalStateException("lanagent relay unavailable")
+
+    /**
+     * Подъём/переиспользование scrcpy-server с жёстким бюджетом времени. Без него
+     * недоступный adbd держал монитор десятки минут (наблюдалось 2561 с) и убивал
+     * вход BankID. Монитор держит только рабочий поток — вызывающий ждёт join'ом
+     * и по таймауту падает сразу.
+     */
+    private fun ensureScrcpy() {
+        val failure = java.util.concurrent.atomic.AtomicReference<Exception?>(null)
+        val worker = Thread({
+            try {
+                ensureScrcpyBlocking()
+            } catch (e: Exception) {
+                failure.set(e)
+            }
+        }, "bankid-scrcpy")
+        worker.isDaemon = true
+        worker.start()
+        worker.join(ENSURE_SCRCPY_TIMEOUT_MS)
+        if (worker.isAlive) {
+            // Застрявший коннект: рвём каналы (разблокирует чтения потока) и падаем.
+            closeSockets()
+            throw IllegalStateException("scrcpy connect timeout ${ENSURE_SCRCPY_TIMEOUT_MS / 1000}s")
+        }
+        failure.get()?.let { throw it }
     }
 
     @Synchronized
-    private fun ensureScrcpy() {
-        // Всегда переспавниваем: socket order (video→audio→control) должен быть наш.
+    private fun ensureScrcpyBlocking() {
+        // Живой сервер уже слушает abstract-сокет? Переиспользуем его: сервер,
+        // заспавненный через нашу wireless-adb сессию, adbd убивает вместе с сессией,
+        // поэтому долгоживущий внешний сервер (usb-adb) надёжнее собственного спавна.
+        if (runCatching { tryConnect() }.getOrDefault(false)) return
+
+        // Своя попытка: переспавниваем — socket order (video→audio→control) должен быть наш.
         scrcpyPid()?.let { pid ->
             shell("kill $pid")
             Thread.sleep(1000)
         }
-        shell(SERVER_CMD)
+        val (spawnOk, spawnOut) = shell(SERVER_CMD, 30000)
+        Log.i(TAG, "spawn ok=$spawnOk out=${spawnOut.take(200)}")
         Thread.sleep(3000)
 
-        val (_, sizeOut) = shell("wm size")
-        Regex("(\\d+)x(\\d+)").find(sizeOut)?.let {
-            screenW = it.groupValues[1].toInt(); screenH = it.groupValues[2].toInt()
-        }
-
-        // Порядок сокетов в tunnel_forward фиксирован: video → audio → control.
         var lastErr: Exception? = null
         repeat(20) {
             try {
-                videoSocket = connectChannel()
-                audioSocket = connectChannel()
-                controlSocket = connectChannel()
-                // Liveness-проба: живой сервер сразу шлёт метаданные в video-сокет.
-                videoSocket!!.soTimeout = 4000
-                val probe = ByteArray(256)
-                val n = videoSocket!!.inputStream.read(probe)
-                if (n <= 0) throw IllegalStateException("scrcpy video silent")
-                videoSocket!!.soTimeout = 0
-                controlOut = controlSocket!!.outputStream
-                // Видео/аудио высасываем фоном — иначе буферы забьются и сервер встанет.
-                listOfNotNull(videoSocket, audioSocket).forEach { sock ->
-                    Thread({
-                        val buf = ByteArray(64 * 1024)
-                        runCatching {
-                            while (sock.inputStream.read(buf) >= 0) { /* drain */ }
-                        }
-                    }, "bankid-drain").apply { isDaemon = true; start() }
-                }
-                Log.i(TAG, "scrcpy control ready ${screenW}x$screenH")
-                return
+                if (tryConnect()) return
             } catch (e: Exception) {
                 lastErr = e
-                closeSockets()
                 Thread.sleep(1000)
             }
         }
         throw IllegalStateException("scrcpy connect failed: ${lastErr?.message}")
     }
 
+    /** Подключение video→audio→control + liveness-проба. true, если сервер жив и наш. */
+    private fun tryConnect(): Boolean {
+        val (_, sizeOut) = shell("wm size")
+        Regex("(\\d+)x(\\d+)").find(sizeOut)?.let {
+            screenW = it.groupValues[1].toInt(); screenH = it.groupValues[2].toInt()
+        }
+        try {
+            videoChannel = connectChannel()
+            audioChannel = connectChannel()
+            controlChannel = connectChannel()
+            // Liveness-проба: живой сервер сразу шлёт метаданные в video-канал.
+            // Таймаута на чтении у adbd-потока нет — оборачиваем в поток с join.
+            val input = videoChannel!!.getInputStream()
+            val probeOk = java.util.concurrent.atomic.AtomicBoolean(false)
+            val probeThread = Thread({
+                runCatching { if (input.read(ByteArray(256)) > 0) probeOk.set(true) }
+            }, "bankid-probe")
+            probeThread.isDaemon = true
+            probeThread.start()
+            probeThread.join(4000)
+            if (!probeOk.get()) throw IllegalStateException("scrcpy video silent")
+            controlOut = controlChannel!!.getOutputStream()
+            // Видео/аудио высасываем фоном — иначе буферы забьются и сервер встанет.
+            listOfNotNull(videoChannel, audioChannel).forEach { ch ->
+                Thread({
+                    val buf = ByteArray(64 * 1024)
+                    runCatching {
+                        val stream = ch.getInputStream()
+                        while (stream.read(buf) >= 0) { /* drain */ }
+                    }
+                }, "bankid-drain").apply { isDaemon = true; start() }
+            }
+            Log.i(TAG, "scrcpy control ready ${screenW}x$screenH")
+            return true
+        } catch (e: Exception) {
+            closeSockets()
+            throw e
+        }
+    }
+
     private fun closeSockets() {
-        runCatching { controlSocket?.close() }
-        runCatching { videoSocket?.close() }
-        runCatching { audioSocket?.close() }
-        controlSocket = null; videoSocket = null; audioSocket = null; controlOut = null
+        runCatching { controlChannel?.close() }
+        runCatching { videoChannel?.close() }
+        runCatching { audioChannel?.close() }
+        controlChannel = null; videoChannel = null; audioChannel = null; controlOut = null
     }
 
     // ── Инъекция тачей по протоколу scrcpy ────────────────────────────────────
@@ -232,6 +308,12 @@ object BankIdAgent {
      * Возвращает null при успехе, иначе текст ошибки.
      */
     fun complete(pinRaw: String, lockPin: String = ""): String? {
+        // Местный вход (бабушка сама открыла BankID): автоматика не вмешивается —
+        // ни PIN, ни тапов. Только окно после удалённого диплинка (BankIdMode).
+        if (!BankIdMode.isRemote()) {
+            Log.i(TAG, "LOCAL-режим: автономные действия BankID запрещены")
+            return "bankid-local-mode"
+        }
         val pin = pinRaw.filter { it.isDigit() }
         if (pin.isEmpty()) return "пустой PIN"
         try {
@@ -241,7 +323,9 @@ object BankIdAgent {
             Thread.sleep(1200)
 
             // Ждём любой экран со «säkerhetskod» (подтверждение или PIN-pad).
-            if (!waitText("säkerhetskod", 10000)) return "экран BankID не найден"
+            // Первый uiautomator dump в свежей adbd-сессии инициализируется долго
+            // (несколько секунд) — 10 с не хватало, сценарий падал зря.
+            if (!waitText("säkerhetskod", 30000)) return "экран BankID не найден"
 
             // Экран подтверждения («Identifiera/Signera med säkerhetskod») — кнопка на
             // месте «0» PIN-pad. Если уже PIN-pad («Ange säkerhetskod») — подтверждать нечего.
@@ -281,4 +365,7 @@ object BankIdAgent {
     }
 
     private const val TAG = "PultBankId"
+
+    /** Жёсткий бюджет на подъём scrcpy: зависший коннект не должен блокировать вход. */
+    private const val ENSURE_SCRCPY_TIMEOUT_MS = 15_000L
 }

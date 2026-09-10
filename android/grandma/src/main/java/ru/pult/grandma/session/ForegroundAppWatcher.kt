@@ -44,7 +44,7 @@ class ForegroundAppWatcher(private val context: Context) {
         "se.swedbank.mobil",
         "com.klarna.mobile",
         "se.seb.android",
-        "com.bankid.bus",
+        BANKID_PACKAGE,
         "se.sparbanken.mobilbank",
         "se.skandiabanken.app",
         "se.icabanken.app",
@@ -93,7 +93,7 @@ class ForegroundAppWatcher(private val context: Context) {
      *  Swedbank оставляем видимым — на нём надо нажать «Logga in», иначе BankID не откроется.
      *  BankID гасим: именно его экран нельзя показывать и именно туда пишем PIN. */
     private val redactPackages: MutableSet<String> = mutableSetOf(
-        "com.bankid.bus",
+        BANKID_PACKAGE,
     )
 
     fun shouldRedactPackage(packageName: String?): Boolean = packageName != null && packageName in redactPackages
@@ -138,6 +138,7 @@ class ForegroundAppWatcher(private val context: Context) {
 
     companion object {
         const val POLL_INTERVAL_MS = 1000L
+        const val BANKID_PACKAGE = "com.bankid.bus"
         private const val LOOKBACK_MS = 10_000L
         private const val STATS_LOOKBACK_MS = 60_000L
         const val REDACT_REASON = "banking-app"

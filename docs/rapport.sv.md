@@ -275,8 +275,8 @@ node scripts/setup-device.mjs gateway <serial> --reinstall
 adb shell am broadcast -a se.pult.app.PAIR -p se.pult.app
 
 # APK-distribution
-https://89-127-235-17.sslip.io/panel/gateway.apk   (operatörsapp)
-https://89-127-235-17.sslip.io/panel/pult-demo.apk (enhetsapp)
+https://85.190.98.57.sslip.io:8445/panel/b-app.apk   (operatörsapp, B-app)
+https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (enhetsapp, A-app)
 
 # Strömbrytare för global proxy (om manuell styrning behövs)
 settings put global http_proxy 127.0.0.1:8877   # på

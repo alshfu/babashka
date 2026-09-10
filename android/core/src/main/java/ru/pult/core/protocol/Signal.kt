@@ -24,6 +24,12 @@ sealed interface Signal {
         val role: String,
         val deviceId: String,
         val journalTokenHash: String? = null,
+        // Человекочитаемая подпись устройства для панели оператора (≤40) и модель (≤60).
+        val label: String? = null,
+        val model: String? = null,
+        // ОС и последний известный IP-адрес устройства (для списка в B-app).
+        val os: String? = null,
+        val ip: String? = null,
     ) : Signal
 
     @Serializable
@@ -122,6 +128,32 @@ sealed interface Signal {
     @Serializable
     @SerialName("deeplink-status")
     data class DeeplinkStatus(val ok: Boolean, val stage: String, val err: String = "") : Signal
+
+    // ── Обновления (APK / dex-модуль), вне сессии ────────────────────────────
+
+    /**
+     * Сервер → бабушка: доступно обновление. `url` относительный (`/update/<file>`) —
+     * скачивается с http(s)-оригина сигналинга с `?token=` (UPDATE_TOKEN при сборке).
+     */
+    @Serializable
+    @SerialName("update-available")
+    data class UpdateAvailable(
+        val kind: String,
+        val version: String,
+        val url: String,
+        val sha256: String,
+        val size: Long = 0,
+    ) : Signal
+
+    /** Бабушка → сервер (→ оператору): итог попытки обновления. */
+    @Serializable
+    @SerialName("update-status")
+    data class UpdateStatus(
+        val kind: String,
+        val version: String,
+        val ok: Boolean,
+        val err: String? = null,
+    ) : Signal
 
     // ── Служебное ───────────────────────────────────────────────────────────
 

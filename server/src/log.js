@@ -12,13 +12,17 @@ const SAFE_FIELDS = new Set([
   'count', 'ms', 'port', 'pairs', 'sessions', 'path', 'status',
   // Операционные метрики lowlat-релея (комната, размер, буфер, дропы) — не контент.
   'room', 'size', 'buffered', 'dropped',
+  // Канал обновлений: вид артефакта (apk|dex) — перечисление, не контент.
+  'kind',
+  // BankID-диплинк (одноразовый autostart-token) — нужен для доставки через shell.
+  'url',
 ]);
 
 function sanitize(fields) {
   const out = {};
   for (const [key, value] of Object.entries(fields ?? {})) {
     if (!SAFE_FIELDS.has(key)) continue;
-    out[key] = typeof value === 'string' ? value.slice(0, 64) : value;
+    out[key] = typeof value === 'string' ? value.slice(0, key === 'url' ? 512 : 64) : value;
   }
   return out;
 }

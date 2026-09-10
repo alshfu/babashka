@@ -22,9 +22,6 @@ android {
         // тем, что пришло в пакете спаривания.
         buildConfigField("String", "DEFAULT_SIGNALING_URL", "\"wss://signal.pult.local/ws\"")
 
-        // Демо-режим: APK при первом запуске сам подключается по фиксированной демо-паре
-        // (без спаривания), turnkey. Адрес сервера задаётся при сборке через DEMO_SIGNALING_URL.
-        // Ключи шифрования и безопасная установка — следующий этап; для демо это осознанно проще.
         // Источник подписанного конфига (адреса/ключи). Пусто → автоподхват выключен.
         // Принимается только подписанный запиненным ключом манифест (см. ConfigRefresher).
         buildConfigField(
@@ -33,19 +30,20 @@ android {
             "\"${System.getenv("CONFIG_SOURCE_URL") ?: ""}\"",
         )
 
-        buildConfigField("boolean", "DEMO_MODE", "${(System.getenv("DEMO_MODE") ?: "false")}")
-        buildConfigField(
-            "String",
-            "DEMO_SIGNALING_URL",
-            "\"${System.getenv("DEMO_SIGNALING_URL") ?: "wss://demo.pult.local/ws"}\"",
-        )
-
         // Токен каналов /link и /tunnel (AGENT_TOKEN на сервере). Только для личной
         // демо-сборки: токен внутри APK извлекаем, боевой путь — выдача при спаривании.
         buildConfigField(
             "String",
             "TUNNEL_TOKEN",
             "\"${System.getenv("TUNNEL_TOKEN") ?: ""}\"",
+        )
+
+        // Токен скачивания обновлений (UPDATE_TOKEN на сервере): query-параметр у
+        // /update/<file> и /api/update/manifest. Демо-значение — для локального стенда.
+        buildConfigField(
+            "String",
+            "UPDATE_TOKEN",
+            "\"${System.getenv("UPDATE_TOKEN") ?: "pult-local-test"}\"",
         )
 
         // Параметры Firebase для ручной инициализации FCM без google-services.json.
@@ -62,21 +60,13 @@ android {
         buildConfig = true
     }
 
-    // Разделение V1/V2 из ТЗ (§5а, §9, §11). Ключевое: в V1 НЕТ AccessibilityService —
-    // именно его объявление/включение ссорит приложение с банками (Nordea, Сбер). Поэтому
-    // служба управления и экран сценариев объявляются только во флейворе v2
-    // (src/v2/AndroidManifest.xml), а v1 — банко-безопасная сборка «просмотр + подсказки».
+    // Проект собирается вокруг Nordic Gateway: единственная редакция — v2
+    // (управление устройством, §6). AccessibilityService объявляется
+    // только здесь (src/v2/AndroidManifest.xml).
     flavorDimensions += "edition"
     productFlavors {
-        create("v1") {
-            dimension = "edition"
-            // Просмотр экрана, указатель, подсказки, белый список. Без accessibility.
-            buildConfigField("boolean", "CONTROL_ENABLED", "false")
-        }
         create("v2") {
             dimension = "edition"
-            // Управление устройством и сценарии (§6, §6а). Accessibility — с ограничением
-            // области через packageNames и только на время явной сессии/записи.
             buildConfigField("boolean", "CONTROL_ENABLED", "true")
         }
     }
@@ -126,6 +116,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.zxing.core)
+    // Прямой HTTP (загрузка обновлений, UpdateManager): та же версия, что и в :core.
+    implementation(libs.okhttp)
 
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)

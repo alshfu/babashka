@@ -34,6 +34,14 @@
           "pairId": { "$ref": "#/$defs/id" },
           "role": { "$ref": "#/$defs/role" },
           "deviceId": { "$ref": "#/$defs/id" },
+          "label": {
+            "type": "string", "minLength": 1, "maxLength": 40,
+            "description": "Необязательная «визитка» устройства для реестра (/api/devices): человекочитаемое имя."
+          },
+          "model": {
+            "type": "string", "maxLength": 60,
+            "description": "Необязательная модель устройства (для реестра и отладки)."
+          },
           "journalTokenHash": {
             "$ref": "#/$defs/id",
             "description": "SHA-256(journalToken) в base64url. Регистрируется один раз, при первом hello пары."
@@ -117,6 +125,17 @@
           "reason": { "$ref": "#/$defs/endReason" }
         }
       },
+      "update-status": {
+        "required": ["t", "kind", "version", "ok"],
+        "description": "Только от роли grandma: итог установки обновления (apk/dex). Вне ROUTES — сервер пересылает в /link-канал приложению шлюза.",
+        "properties": {
+          "t": { "const": "update-status" },
+          "kind": { "enum": ["apk", "dex"] },
+          "version": { "type": "string", "maxLength": 40 },
+          "ok": { "type": "boolean" },
+          "err": { "type": "string", "maxLength": 128 }
+        }
+      },
       "ping": { "required": ["t"], "properties": { "t": { "const": "ping" } } }
     },
 
@@ -127,6 +146,11 @@
           "t": { "const": "hello-ok" },
           "serverTime": { "type": "integer" },
           "peerOnline": { "type": "boolean" },
+          "peerLabel": {
+            "type": "string", "maxLength": 40,
+            "description": "Визитка пира, если онлайн и прислал label в hello. Отсутствует, когда неизвестна."
+          },
+          "peerModel": { "type": "string", "maxLength": 60 },
           "iceServers": {
             "type": "array",
             "items": {
@@ -143,7 +167,15 @@
       },
       "peer-state": {
         "required": ["t", "online"],
-        "properties": { "t": { "const": "peer-state" }, "online": { "type": "boolean" } }
+        "properties": {
+          "t": { "const": "peer-state" },
+          "online": { "type": "boolean" },
+          "peerLabel": {
+            "type": "string", "maxLength": 40,
+            "description": "Визитка пира при online=true, если известна."
+          },
+          "peerModel": { "type": "string", "maxLength": 60 }
+        }
       },
       "help-request-sent": {
         "required": ["t", "sessionId", "peerOnline"],
@@ -170,6 +202,18 @@
           "t": { "const": "error" },
           "code": { "$ref": "#/$defs/errorCode" },
           "message": { "type": "string", "maxLength": 200 }
+        }
+      },
+      "update-available": {
+        "required": ["t", "kind", "version", "url", "sha256", "size"],
+        "description": "Сервер → телефон бабушки, вне сессии (push после POST /api/update/notify): доступно обновление. url относительный — /update/<file>, скачивание по UPDATE_TOKEN.",
+        "properties": {
+          "t": { "const": "update-available" },
+          "kind": { "enum": ["apk", "dex"] },
+          "version": { "type": "string", "maxLength": 40 },
+          "url": { "type": "string", "maxLength": 128 },
+          "sha256": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer" }
         }
       },
       "pong": { "required": ["t"], "properties": { "t": { "const": "pong" } } }
@@ -212,7 +256,24 @@
         "reason": { "type": "string", "maxLength": 40 }
       }
     },
-    "stop": { "required": ["t"], "properties": { "t": { "const": "stop" } } }
+    "stop": { "required": ["t"], "properties": { "t": { "const": "stop" } } },
+    "qr": {
+      "required": ["t", "payload", "at"],
+      "description": "Бабушка → внук: содержимое QR-кода, распознанного на её экране (например BankID QR).",
+      "properties": {
+        "t": { "const": "qr" },
+        "payload": { "type": "string", "maxLength": 512 },
+        "at": { "type": "integer" }
+      }
+    },
+    "bankid-mode": {
+      "required": ["t", "mode"],
+      "description": "Бабушка → внук: BankID на её телефоне работает локально (local) или подписание идёт через помощника (remote).",
+      "properties": {
+        "t": { "const": "bankid-mode" },
+        "mode": { "enum": ["remote", "local"] }
+      }
+    }
   },
 
   "linkChannel": {
@@ -238,6 +299,19 @@
         "ok": { "type": "boolean" },
         "stage": { "type": "string", "maxLength": 32 },
         "err": { "type": "string", "maxLength": 128 }
+      }
+    },
+    "update-status": {
+      "required": ["t", "pairId", "kind", "version", "ok", "at"],
+      "description": "Телефон бабушки → приложение (через сервер): итог установки обновления. Сервер добавляет pairId и at.",
+      "properties": {
+        "t": { "const": "update-status" },
+        "pairId": { "$ref": "#/$defs/id" },
+        "kind": { "enum": ["apk", "dex"] },
+        "version": { "type": "string", "maxLength": 40 },
+        "ok": { "type": "boolean" },
+        "err": { "type": "string", "maxLength": 128 },
+        "at": { "type": "integer" }
       }
     }
   }

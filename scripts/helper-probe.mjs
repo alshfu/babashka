@@ -3,7 +3,7 @@
 // Проверяет путь панели без браузера: присутствие, авто-accept, SDP offer.
 import WebSocket from '../server/node_modules/ws/index.js';
 
-const url = process.argv[2] || 'wss://89-127-235-17.sslip.io/ws';
+const url = process.argv[2] || 'wss://85.190.98.57.sslip.io:8445/ws';
 const pairId = 'demo-pair-000000000000';
 const ws = new WebSocket(url);
 const t0 = Date.now();

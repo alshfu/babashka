@@ -1,5 +1,6 @@
 # Сборка
 node_modules/
+tools/
 android/build/
 android/*/build/
 android/.gradle/

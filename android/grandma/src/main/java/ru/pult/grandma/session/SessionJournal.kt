@@ -50,11 +50,11 @@ class SessionJournal(context: Context) {
     fun readable(): List<String> = read().map { entry ->
         val when1 = dateFormat.format(Date(entry.requestedAt))
         val outcome = when {
-            entry.screenShown -> "показ экрана, ${(entry.endedAt - entry.requestedAt) / 1000} с"
-            entry.consented -> "разрешено, но показ не состоялся (${entry.reason})"
-            entry.reason == "declined" -> "вы отказали"
-            entry.reason == "no-answer" -> "вы не ответили"
-            entry.reason == "auth-failed" -> "чужое устройство не пустили"
+            entry.screenShown -> "skärmdelning, ${(entry.endedAt - entry.requestedAt) / 1000} s"
+            entry.consented -> "tillåtet, men visningen blev inte av (${entry.reason})"
+            entry.reason == "declined" -> "du avböjde"
+            entry.reason == "no-answer" -> "du svarade inte"
+            entry.reason == "auth-failed" -> "okänd enhet släpptes inte in"
             else -> entry.reason
         }
         "$when1 · ${entry.peerName} · $outcome"
@@ -92,6 +92,6 @@ class SessionJournal(context: Context) {
 
     private companion object {
         const val RETENTION_MS = 365L * 24 * 60 * 60 * 1000
-        val dateFormat = SimpleDateFormat("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
+        val dateFormat = SimpleDateFormat("d MMMM, HH:mm", Locale.forLanguageTag("sv"))
     }
 }

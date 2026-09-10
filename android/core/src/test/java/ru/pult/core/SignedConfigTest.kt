@@ -27,7 +27,7 @@ class SignedConfigTest {
         val m = SignedConfig.verify(envelope(payload, sig), pub)
         requireNotNull(m) { "валидный конверт должен пройти" }
         assertEquals(2, m.endpoints.size)
-        assertEquals("wss://89-127-235-17.sslip.io/ws", m.endpoints[0])
+        assertEquals("wss://85.190.98.57.sslip.io:8445/ws", m.endpoints[0])
         assertEquals(1000L, m.updatedAt)
     }
 

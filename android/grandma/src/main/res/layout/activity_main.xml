@@ -1,129 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Экран бабушки. Она открывает его редко и НЕ совершает тут действий.
-  Никаких кнопок: настройка и отзыв помощника — забота семьи, а не бабушки
-  (доступ у одного доверенного человека). Всё, что нужно ей, — видеть, что всё хорошо.
+  Лицо службы. Два состояния: чего-то не хватает — список только недостающего
+  с кнопками «Включить»; всё включено — один тихий статус без единого действия.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="32dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/state"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="34sp"
-        android:textStyle="bold"
-        android:textColor="#22C55E"
-        android:text="@string/main_ok" />
+    <!-- Состояние «не всё включено»: заголовок + только недостающие пункты. -->
+    <ScrollView
+        android:id="@+id/missingView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/helper"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:gravity="center"
-        android:textSize="22sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
 
+            <TextView
+                android:id="@+id/missingHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:text="@string/main_missing_header" />
 
-    <Button
-        android:id="@+id/scenarios"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="36dp"
-        android:textSize="18sp"
-        android:text="@string/main_scenarios" />
+            <LinearLayout
+                android:id="@+id/missingList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:orientation="vertical" />
+        </LinearLayout>
+    </ScrollView>
 
-
-    <Button
-        android:id="@+id/vpn"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:textSize="18sp"
-        android:text="@string/main_vpn" />
-
-    <!-- Визуальный эмулятор BankID для записи сценариев (только отладка). -->
-    <Button
-        android:id="@+id/bankidEmulator"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:textSize="18sp"
-        android:text="BankID Emulator" />
-
-    <!-- PIN BankID для локального завершения входа по диплинку (только V2).
-         Хранится на устройстве, никуда не передаётся. -->
-    <EditText
-        android:id="@+id/bankidPin"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="24dp"
-        android:ems="10"
-        android:hint="BankID PIN"
-        android:importantForAutofill="no"
-        android:inputType="numberPassword"
-        android:textAlignment="center" />
-
-    <!-- Код экрана блокировки: headless-телефон стоит на пароле, без разблокировки
-         BankID не открыть. -->
-    <EditText
-        android:id="@+id/lockPin"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:ems="10"
-        android:hint="Lock screen code"
-        android:importantForAutofill="no"
-        android:inputType="textPassword"
-        android:textAlignment="center" />
-
-    <Button
-        android:id="@+id/bankidPinSave"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:textSize="18sp"
-        android:text="Save PIN" />
-
-    <!-- Разовый паринг wireless ADB (порт и код из системного диалога отладки). -->
+    <!-- Состояние «всё включено»: тихий статус, ничего лишнего. -->
     <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:orientation="horizontal">
+        android:id="@+id/statusView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
 
-        <EditText
-            android:id="@+id/pairPort"
-            android:layout_width="110dp"
-            android:layout_height="wrap_content"
-            android:hint="port"
-            android:importantForAutofill="no"
-            android:inputType="number" />
-
-        <EditText
-            android:id="@+id/pairCode"
-            android:layout_width="110dp"
-            android:layout_height="wrap_content"
-            android:hint="code"
-            android:importantForAutofill="no"
-            android:inputType="number" />
-
-        <Button
-            android:id="@+id/pairBtn"
+        <TextView
+            android:id="@+id/serviceName"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Pair" />
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:text="@string/app_name" />
+
+        <TextView
+            android:id="@+id/serviceState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:textSize="22sp"
+            android:text="@string/main_service_running" />
+
+        <TextView
+            android:id="@+id/linkState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/helperState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/quietHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="#888888"
+            android:text="@string/main_quiet_hint" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/pairStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:textSize="14sp" />
-
-</LinearLayout>
+</FrameLayout>

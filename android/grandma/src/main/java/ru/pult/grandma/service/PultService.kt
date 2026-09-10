@@ -28,15 +28,21 @@ import ru.pult.grandma.BuildConfig
 import ru.pult.grandma.PultApp
 import ru.pult.grandma.session.ForegroundAppWatcher
 import android.view.WindowManager
+import java.net.NetworkInterface
+import ru.pult.grandma.control.BankIdMode
 import ru.pult.grandma.control.RemoteControlService
 import ru.pult.grandma.net.ConfigRefresher
 import ru.pult.grandma.net.EndpointStore
+import ru.pult.grandma.net.UpdateManager
+import ru.pult.grandma.session.QrWatcher
 import ru.pult.grandma.session.SessionController
 import ru.pult.grandma.session.SessionJournal
 import ru.pult.grandma.push.PultMessagingService
 import ru.pult.grandma.session.WebRtcScreenTransport
+import ru.pult.grandma.updatable.ModuleRegistry
+import ru.pult.grandma.ui.BankIdPinActivity
 import ru.pult.grandma.ui.ConsentActivity
-import ru.pult.grandma.ui.overlay.SessionOverlay
+import ru.pult.grandma.pin.PinStorage
 
 /**
  * Видимый фоновый сервис (ТЗ п.4).
@@ -51,34 +57,42 @@ class PultService : LifecycleService() {
 
     private lateinit var pairStore: PairStore
     private lateinit var journal: SessionJournal
-    private var overlay: SessionOverlay? = null
     private var signaling: SignalingClient? = null
     private var controller: SessionController? = null
     private var tunnel: ru.pult.core.tunnel.TunnelEgress? = null
     private var foregroundJob: Job? = null
-    private var peerName: String? = null
     private lateinit var keepAlive: KeepAlive
+    private lateinit var updates: UpdateManager
+    private lateinit var qrWatcher: QrWatcher
 
     // Сохранённое состояние автоповорота экрана — восстанавливаем после сессии.
     private var rotationWasLocked: Int? = null
     private var rotationWasUser: Int? = null
 
+    // Дедупликация bankid-диплинков: повтор той же ссылки в течение 30 с не поднимаем.
+    private var lastDeeplinkUrl: String? = null
+    private var lastDeeplinkAt = 0L
+
     // Мост на главный поток: колбэки datachannel и присутствия приходят с потоков libwebrtc.
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    // Смена сети (Wi-Fi ↔ LTE): сокет над умершей сетью молчит до таймаута, а backoff
+    // к этому моменту уже вырос — просим SignalingClient переподключаться немедленно.
+    private val networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: android.net.Network) {
+            signaling?.forceReconnectNow()
+        }
+
+        override fun onLost(network: android.net.Network) {
+            signaling?.forceReconnectNow()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         pairStore = EncryptedPairStore(this)
         journal = SessionJournal(this)
-        overlay = SessionOverlay(this)
 
-        // Режим записи сценария — противоположность показу: экран НЕ снимаем, только
-        // действия. Поэтому на входе в запись глушим любой активный показ и вешаем красный
-        // индикатор записи; на выходе — снимаем. Всё через главный поток: колбэк прилетает
-        // из потока службы доступности.
-        ru.pult.grandma.control.ScenarioRecorder.shared.onStateChange = { recording ->
-            mainHandler.post { if (recording) enterRecordingMode() else exitRecordingMode() }
-        }
         // Держим Wi-Fi и CPU живыми, иначе на MIUI при выключенном экране сокет умирает
         // и запрос помощи до бабушки не доходит (docs/android-grandma.md §3).
         keepAlive = KeepAlive(this).also { it.acquire() }
@@ -92,11 +106,30 @@ class PultService : LifecycleService() {
         ServiceWatchdog.schedule(this)
         ServiceHeartbeat.schedule(this)
         ServiceHeartbeat.Deaths.markAlive(this, "onCreate")
+        // Самодиагностика фоновых разрешений: что прошивка отобрала — видно по журналу.
+        BootDiagnostics.run(this)
+        runCatching {
+            getSystemService(android.net.ConnectivityManager::class.java)
+                ?.registerDefaultNetworkCallback(networkCallback)
+        }
+        // Периодическая проверка обновлений (apk/dex) — дополняет мгновенный пуш.
+        UpdateCheckWorker.schedule(this)
+
+        updates = UpdateManager(this)
+        // QR с экрана BankID (удалённый вход) — помощнику по control-каналу.
+        qrWatcher = QrWatcher(this) { payload -> controller?.sendControl(payload) }
+        // Режим BankID (удалённый/местный вход) — помощнику, если канал открыт.
+        BankIdMode.onModeChange = { mode ->
+            val name = if (mode == BankIdMode.Mode.REMOTE) "remote" else "local"
+            controller?.sendControl("""{"t":"bankid-mode","mode":"$name"}""")
+        }
 
         // Автоподхват адресов/ключей из подписанного источника — ДО подключения, чтобы
         // связаться уже по актуальному списку входов. Применяется, только если подпись сходится.
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { ConfigRefresher(this@PultService).refresh() }
+            // dex-модуль, применённый до перезапуска, поднимаем обратно (sha сверяется).
+            runCatching { updates.loadPersistedModule() }
         }
 
         pairStore.load()?.let(::connect)
@@ -104,11 +137,19 @@ class PultService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        // Защита exact-будильника: после ребута/глубокого Doze планировщик мог его потерять —
+        // каждый легальный старт сервиса перевзводит оба сторожа.
+        ServiceHeartbeat.schedule(this)
         when (intent?.action) {
             ACTION_GRANT -> onConsentGranted(intent)
             ACTION_DENY -> controller?.deny()
             ACTION_STOP_SESSION -> stopSession()
             ACTION_PAIR_CHANGED -> reconnect()
+            ACTION_TEST_LOGIN -> {
+                // Локальный диплинк (pult://bankid-login?url=...): та же цепочка, что от
+                // шлюза — без сервера и без клиента, статусы только в лог.
+                intent?.getStringExtra(EXTRA_URL)?.let { handleDeeplink(null, it) }
+            }
             ACTION_PAIR_ADB -> {
                 // Паринг wireless ADB: с явными port/code — напрямую; без аргументов —
                 // авто-паринг: открываем системный диалог и читаем код своей a11y-службой.
@@ -138,7 +179,6 @@ class PultService : LifecycleService() {
     }
 
     private fun connect(pair: PairRecord) {
-        peerName = pair.peerName
         // Список входов: адрес пары + запасные (другие домены/CDN). РКН режет known-адреса,
         // поэтому один заблокированный вход не должен отрезать бабушку — клиент переберёт
         // остальные. Список пополняется из подписанного источника (EndpointStore).
@@ -150,24 +190,29 @@ class PultService : LifecycleService() {
                 role = Role.GRANDMA,
                 deviceId = deviceId(),
                 journalTokenHash = pair.journalTokenHash,
+                label = deviceLabel(),
+                model = Build.MODEL.take(60),
+                os = "Android ${Build.VERSION.RELEASE}",
+                ip = localIp(),
             ),
             scope = lifecycleScope,
         )
         signaling = client
 
+        val transport = WebRtcScreenTransport(this).also {
+            it.setFrameListener(qrWatcher::onFrame)
+        }
         val session = SessionController(
             pair = pair,
             signaling = client,
-            transport = WebRtcScreenTransport(this),
+            transport = transport,
             journal = journal,
             scope = lifecycleScope,
         )
         session.onControlMessage = ::onControlMessage
         session.onCaptureStarting = { promoteToMediaProjection(true) }
-        // Турнкей-режим («поставили и забыли»): бабушка не совершает действий.
-        // Видимость при этом сохраняется полностью — это отдельная, неотключаемая вещь.
-        // В отладке владелец подключается к своему устройству — согласие по умолчанию.
-        session.autoAccept = PultApp.prefs(this).getBoolean(PREF_AUTO_ACCEPT, BuildConfig.DEBUG)
+        // Песочница: автосогласие — единственный режим (SessionController.autoAccept = true),
+        // запрос от спаренного помощника принимается без диалогов.
         controller = session
 
         lifecycleScope.launch {
@@ -178,6 +223,7 @@ class PultService : LifecycleService() {
                     is Signal.Revoke -> onRevoke(pair, signal)
                     is Signal.Deeplink -> onDeeplink(client, signal)
                     is Signal.Screencast -> onScreencast(pair, signal)
+                    is Signal.UpdateAvailable -> updates.onPush(signal, pair.signalingUrl) { client.send(it) }
                     else -> session.handle(signal)
                 }
             }
@@ -190,12 +236,15 @@ class PultService : LifecycleService() {
                     PultMessagingService.token(this@PultService)?.let {
                         client.send(Signal.RegisterPush(it))
                     }
+                    // Отложенный статус фоновой проверки обновлений (UpdateCheckWorker).
+                    updates.pendingStatus()?.let(client::send)
                 }
             }
         }
         lifecycleScope.launch {
             client.link.collect { link ->
-                notify(Notifications.status(this@PultService, peerName, link == SignalingClient.Link.ONLINE))
+                signalingOnline = link == SignalingClient.Link.ONLINE
+                notify(Notifications.status(this@PultService, link == SignalingClient.Link.ONLINE))
             }
         }
         lifecycleScope.launch {
@@ -216,6 +265,27 @@ class PultService : LifecycleService() {
         runCatching {
             android.provider.Settings.Global.putInt(contentResolver, "adb_wifi_enabled", 1)
         }
+        // Прогрев adbd-сессии: complete() у диплинка срабатывает только при УЖЕ
+        // живой сессии (hasLiveSession), а ленивый коннект в горячий момент поздно.
+        // Порт известен после паринга; недоступен — exec вернёт false и ничего не ломает.
+        Thread {
+            Thread.sleep(4_000) // даём adbd поднять TLS-листенер после включения флага
+            val (ok, out) = ru.pult.grandma.control.AdbShell.exec(
+                "uiautomator dump /data/local/tmp/ba-ui.xml", 30_000,
+            )
+            android.util.Log.i("PultAdb", "warmup ok=$ok ${out.take(60)}")
+            // LanAgent — постоянный on-device канал ввода (TCP loopback, не виден
+            // BankID, переживает выключение wireless debugging). dex лежит в
+            // /data/local/tmp (ставится один раз при настройке, переживает ребуты).
+            if (!ru.pult.grandma.control.LanShell.available()) {
+                val (spawned, spawnOut) = ru.pult.grandma.control.AdbShell.exec(
+                    "setsid sh -c 'CLASSPATH=/data/local/tmp/lanagent.dex " +
+                        "app_process / LanAgent 47201 </dev/null >/sdcard/lanagent.log 2>&1 &'",
+                    15_000,
+                )
+                android.util.Log.i("PultLan", "spawn lanagent ok=$spawned ${spawnOut.take(60)}")
+            }
+        }.start()
 
         // TCP-туннель для приложения шлюза (Swedbank выходит с IP этого телефона).
         // Токен зашит при сборке (личный демо-режим); пустой — туннель выключен.
@@ -232,8 +302,8 @@ class PultService : LifecycleService() {
     private fun renderUi(state: SessionController.Ui) {
         when (state) {
             is SessionController.Ui.Idle -> {
-                overlay?.hide()
                 foregroundJob?.cancel()
+                qrWatcher.stop()
                 cancel(Notifications.ID_SESSION)
                 restoreRotation()
                 // Проекция переживает сессию (на MIUI её из фона не пересоздать), поэтому
@@ -243,21 +313,22 @@ class PultService : LifecycleService() {
             }
 
             is SessionController.Ui.Asked ->
-                // Турнкей + проекция уже поднята → поднимаем показ без системного диалога:
-                // из фона на MIUI его всё равно не открыть, а именно так ломалась вторая
-                // сессия. Видимость сохраняют рамка и уведомление. В обычном (не-турнкей)
-                // режиме согласие спрашивается каждый раз — как и должно быть в продукте.
-                if (state.auto && controller?.captureReady == true) {
+                // Автосогласие (песочница): запрос спаренного помощника принимаем сами.
+                // Проекция уже поднята → показ без системного диалога (из фона на MIUI его
+                // всё равно не открыть, а именно так ломалась вторая сессия). Проекции нет
+                // (первый запуск) — системное согласие на захват через ConsentActivity;
+                // своих диалогов у приложения нет.
+                if (controller?.captureReady == true) {
                     controller?.grant()
                 } else {
-                    ConsentActivity.show(this, state.peerName, state.note, auto = state.auto)
+                    ConsentActivity.requestCapture(this)
                 }
 
             is SessionController.Ui.Session -> {
                 // Тип mediaProjection уже включён в onCaptureStarting — до создания проекции.
-                // Рамка, подпись и «Стоп» — всё время сессии, без вариантов их убрать.
-                overlay?.show(state.peerName, onStop = ::stopSession)
+                // Уведомление с «Стоп» — всё время сессии, без вариантов его убрать.
                 notify(Notifications.session(this, state.peerName), Notifications.ID_SESSION)
+                qrWatcher.start()
                 watchForegroundApp()
                 lockRotationPortrait()
                 // Сообщаем помощнику, доступно ли управление (включена ли служба), как только
@@ -305,7 +376,7 @@ class PultService : LifecycleService() {
     private fun promoteToMediaProjection(active: Boolean) {
         val connectedNow = signaling?.link?.value == SignalingClient.Link.ONLINE
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            startForeground(Notifications.ID_STATUS, Notifications.status(this, peerName, connectedNow))
+            startForeground(Notifications.ID_STATUS, Notifications.status(this, connectedNow))
             return
         }
         val type = if (active) {
@@ -314,17 +385,40 @@ class PultService : LifecycleService() {
         } else {
             android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         }
-        startForeground(Notifications.ID_STATUS, Notifications.status(this, peerName, connectedNow), type)
+        // Пойман на Redmi (HyperOS, Android 15): при исчерпанной дневной квоте dataSync
+        // (6 ч) startForeground бросает ForegroundServiceStartNotAllowedException ПРЯМО из
+        // onCreate — процесс падает, система перезапускает сервис через ~11 с, квота не
+        // восстанавливается → бесконечный краш-луп, и connect() не выполняется никогда
+        // (устройство молча офлайн). Поэтому: ловим, переходим на remoteMessaging
+        // (независимая квота, тип объявлен в манифесте именно для таких дней), а если
+        // и он отказал — остаёмся не-foreground, но ДОЖИВАЕМ до connect(): канал поднимется,
+        // поднимет позже BootBridge или будильник-сторож при легальном окне.
+        try {
+            startForeground(Notifications.ID_STATUS, Notifications.status(this, connectedNow), type)
+        } catch (dataSyncBlocked: RuntimeException) {
+            android.util.Log.w(TAG, "dataSync FGS blocked ($dataSyncBlocked) — fallback to remoteMessaging")
+            ServiceHeartbeat.Deaths.markDeath(this, "fgs-datasync-blocked")
+            runCatching {
+                startForeground(
+                    Notifications.ID_STATUS,
+                    Notifications.status(this, connectedNow),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
+                )
+            }.onFailure {
+                android.util.Log.w(TAG, "remoteMessaging FGS blocked too ($it) — continue without foreground")
+                ServiceHeartbeat.Deaths.markDeath(this, "fgs-all-types-blocked")
+            }
+        }
     }
 
     /**
-     * Управление от помощника по data-каналу: указатель, подписи, а также реальные
-     * тап/свайп/навигация — их выполняет служба доступности (RemoteControlService).
+     * Управление от помощника по data-каналу: реальные тап/свайп/навигация — их выполняет
+     * служба доступности (RemoteControlService).
      * Координаты приходят в долях кадра (0..1); переводим в пиксели экрана бабушки.
-     * Если служба не включена — управление недоступно, но показ и указатель работают.
+     * Если служба не включена — управление недоступно, но показ работает.
      *
      * ВАЖНО: этот колбэк приходит с signaling-потока libwebrtc, а не с главного.
-     * Любое обращение к View оверлея обязано уйти на главный поток — иначе исключение
+     * Любое обращение к UI обязано уйти на главный поток — иначе исключение
      * «wrong thread» всплывёт в нативном JNI-колбэке и уронит процесс через SIGABRT.
      */
     private fun onControlMessage(payload: String) {
@@ -332,17 +426,10 @@ class PultService : LifecycleService() {
         val message = runCatching { Json.parseToJsonElement(payload).jsonObject }.getOrNull() ?: return
         fun frac(k: String) = message[k]?.jsonPrimitive?.float
         when (message["t"]?.jsonPrimitive?.content) {
-            "pointer" -> {
-                val x = frac("x") ?: return
-                val y = frac("y") ?: return
-                mainHandler.post { overlay?.movePointer(x, y) }
-            }
-
-            // Реальный тап: показываем указатель И нажимаем за бабушку.
+            // Реальный тап за бабушку.
             "tap" -> {
                 val x = frac("x") ?: return
                 val y = frac("y") ?: return
-                mainHandler.post { overlay?.movePointer(x, y) }
                 val (w, h) = displaySize()
                 RemoteControlService.instance?.tap(x * w, y * h)
             }
@@ -386,24 +473,8 @@ class PultService : LifecycleService() {
                 RemoteControlService.instance?.focus(dir)
             }
 
-            // Обучение: слайд-инструкция приходит чанками (картинка в base64), затем показ.
-            "slide" -> {
-                val id = message["id"]?.jsonPrimitive?.content ?: return
-                val data = message["data"]?.jsonPrimitive?.content ?: return
-                slideBuffer.getOrPut(id) { StringBuilder() }.append(data)
-            }
-            "slide-done" -> {
-                val id = message["id"]?.jsonPrimitive?.content ?: return
-                val caption = message["caption"]?.jsonPrimitive?.content
-                val b64 = slideBuffer.remove(id)?.toString() ?: return
-                val bytes = runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull() ?: return
-                val bmp = runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull() ?: return
-                mainHandler.post { overlay?.showSlide(bmp, caption) }
-            }
-            "slide-hide" -> mainHandler.post { overlay?.hideSlide() }
-
-            // Дерево UI для записи сценариев: панель показывает элементы кликабельными,
-            // даже когда видео заблокировано (FLAG_SECURE). Ответ уходит тем же каналом.
+            // Дерево доступности для помощника: элементы видны, даже когда видео
+            // заблокировано (FLAG_SECURE). Ответ уходит тем же каналом.
             "dump-ui" -> {
                 val tree = RemoteControlService.dumpTreeJson()
                 android.util.Log.i("PultControl", "dump-ui: tree=${tree?.take(200)}")
@@ -411,98 +482,9 @@ class PultService : LifecycleService() {
                 android.util.Log.i("PultControl", "dump-ui: sent")
             }
 
-            // Запись сценария с панели: тапы по дереву UI записываются как шаги.
-            "start-recording" -> mainHandler.post {
-                ru.pult.grandma.control.ScenarioRecorder.shared.start()
-                notify(Notifications.status(this@PultService, peerName, connected = true))
-            }
-            "stop-recording" -> mainHandler.post {
-                val steps = ru.pult.grandma.control.ScenarioRecorder.shared.stop()
-                val name = message["name"]?.jsonPrimitive?.content ?: "Сценарий ${steps.size} шагов"
-                val scenario = ru.pult.grandma.control.Scenario(
-                    id = java.util.UUID.randomUUID().toString().take(8),
-                    name = name,
-                    createdAt = System.currentTimeMillis(),
-                    steps = steps,
-                )
-                ru.pult.grandma.control.ScenarioStore(filesDir).add(scenario)
-                notify(Notifications.status(this@PultService, peerName, connected = true))
-            }
-
-            // Сохранить сценарий, записанный в панели (эмулятор PIN BankID).
-            // Шаги приходят готовыми с координатами — телефон только сохраняет.
-            "save-scenario" -> {
-                val name = message["name"]?.jsonPrimitive?.content ?: return
-                val stepsJson = message["steps"] ?: return
-                mainHandler.post {
-                    runCatching {
-                        val steps = kotlinx.serialization.json.Json.decodeFromJsonElement(
-                            kotlinx.serialization.builtins.ListSerializer(ru.pult.grandma.control.Step.serializer()),
-                            stepsJson,
-                        )
-                        val scenario = ru.pult.grandma.control.Scenario(
-                            id = java.util.UUID.randomUUID().toString().take(8),
-                            name = name,
-                            createdAt = System.currentTimeMillis(),
-                            steps = steps,
-                        )
-                        ru.pult.grandma.control.ScenarioStore(filesDir).add(scenario)
-                        android.util.Log.i("PultControl", "scenario saved from panel: $name (${steps.size} steps)")
-                    }.onFailure {
-                        android.util.Log.e("PultControl", "save-scenario failed: ${it.message}")
-                    }
-                }
-            }
-
-            // Открыть эмулятор BankID на телефоне: панель вызывает копию экрана,
-            // тапает по ней, шаги пишутся. Потом тот же сценарий идёт на живой BankID.
-            "open-emulator" -> mainHandler.post {
-                runCatching {
-                    startActivity(
-                        android.content.Intent(this@PultService, ru.pult.grandma.ui.BankIdEmulatorActivity::class.java)
-                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }
-
-            // Воспроизвести сценарий на живом приложении: открыть его и повторить шаги.
-            "replay-scenario" -> {
-                val name = message["name"]?.jsonPrimitive?.content ?: return
-                mainHandler.post {
-                    val scenario = ru.pult.grandma.control.ScenarioStore(filesDir).load()
-                        .firstOrNull { it.name == name || it.id == name }
-                    if (scenario == null) {
-                        android.util.Log.w("PultControl", "scenario not found: $name")
-                        return@post
-                    }
-                    // Открыть целевое приложение, затем воспроизвести шаги.
-                    val pkg = scenario.steps.firstOrNull { it.expectPackage != null }?.expectPackage
-                    pkg?.let { p ->
-                        runCatching {
-                            packageManager.getLaunchIntentForPackage(p)?.let { intent ->
-                                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                                startActivity(intent)
-                            }
-                        }
-                    }
-                    // Шаги воспроизводит ScenarioPlayer через службу доступности.
-                    // play() спит между шагами — гоним в фоне, чтобы не вешать главный поток.
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        Thread {
-                            val result = RemoteControlService.instance?.player?.play(scenario)
-                            android.util.Log.i("PultControl", "replay result: $result")
-                        }.start()
-                    }, 2000)
-                    android.util.Log.i("PultControl", "replaying scenario: ${scenario.name} (${scenario.steps.size} steps)")
-                }
-            }
-
             "stop" -> mainHandler.post { stopSession() }
         }
     }
-
-    /** Сборка приходящих чанков слайда по id (обучающий режим). */
-    private val slideBuffer = HashMap<String, StringBuilder>()
 
     /** Реальный размер дисплея в пикселях — для перевода долей кадра в координаты жеста. */
     private fun displaySize(): Pair<Int, Int> {
@@ -558,6 +540,11 @@ class PultService : LifecycleService() {
             var serviceDisabledForBanking = false
             while (isActive) {
                 val shouldRedact = watcher.shouldRedact()
+                // Режим BankID: вход по недавнему диплинку от шлюза — удалённый (автоматика
+                // разрешена), иначе местный (BankIdAgent молчит). QR-наблюдение следит
+                // за тем же пакетом. Гашение (ниже) от этого не зависит и не меняется.
+                if (watcher.lastPackage == ForegroundAppWatcher.BANKID_PACKAGE) BankIdMode.onBankIdForeground()
+                qrWatcher.onForegroundPackage(watcher.lastPackage)
                 if (shouldRedact != redacted) {
                     redacted = shouldRedact
                     controller?.setRedacted(shouldRedact, watcher.lastPackage)
@@ -585,7 +572,6 @@ class PultService : LifecycleService() {
 
     private fun stopSession() {
         controller?.stop()
-        overlay?.hide()
         cancel(Notifications.ID_SESSION)
     }
 
@@ -640,32 +626,10 @@ class PultService : LifecycleService() {
     }
 
     /**
-     * Вход в режим записи сценария. Захват экрана здесь неуместен: мы не снимаем пиксели,
-     * а записываем действия. Поэтому останавливаем любой идущий показ и переключаем оверлей
-     * на красный индикатор записи — бабушка видит, что идёт запись, а не трансляция.
-     */
-    private fun enterRecordingMode() {
-        if (controller?.ui?.value !is SessionController.Ui.Idle) {
-            controller?.stop()
-            cancel(Notifications.ID_SESSION)
-        }
-        // Полностью отпускаем проекцию: в записи ничего не снимаем, и это должно быть правдой,
-        // а не «поставили на паузу». Следующий показ возьмёт разрешение заново.
-        controller?.releaseCapture()
-        promoteToMediaProjection(false)
-        overlay?.hide()
-        overlay?.showRecording()
-    }
-
-    private fun exitRecordingMode() {
-        overlay?.hide()
-    }
-
-    /**
      * Роняем приложение на рабочий стол в момент старта показа. `MediaProjection`
      * захватывает весь дисплей независимо от того, какое окно наверху, — поэтому помощник
-     * начинает видеть настоящий экран бабушки, а не наше окно «Всё работает». Сквозной
-     * оверлей (рамка + указатель) и уведомление «Стоп» остаются поверх: видимость сохраняется.
+     * начинает видеть настоящий экран бабушки, а не наше окно «Всё работает».
+     * Уведомление со «Стоп» остаётся на месте: видимость сохраняется.
      */
     private fun stepAside() {
         val home = Intent(Intent.ACTION_MAIN).apply {
@@ -691,46 +655,178 @@ class PultService : LifecycleService() {
         // Даём ack уйти, потом рвём всё.
         mainHandler.postDelayed({
             pairStore.clear()
-            peerName = null
             signaling?.close()
             signaling = null
             controller = null
-            notify(Notifications.status(this, null, connected = false))
+            notify(Notifications.status(this, connected = false))
         }, 300)
     }
 
     /**
-     * Диплинк от шлюз-приложения (канал /link): открываем BankID и сами завершаем вход —
-     * без панели и без WebRTC-сессии. Тачи идут через scrcpy-инъекцию (BankIdAgent),
-     * PIN берём из настроек (задаётся один раз на телефоне, никуда не уходит).
+     * Поднять BankID с UI: вывести на передний план гарантированно, не сжигая заказ.
+     * На MIUI startActivity «успешен» (исключения нет), но BankID остаётся в фоне,
+     * а autostart-token при этом уже сгорает — поэтому без проверки переднего плана нельзя.
+     *
+     * Порядок: прямой startActivity → 4 с опроса UsageStats (com.bankid.bus наверху?) →
+     * full-screen intent-уведомление (путь «будильника», работает на MIUI) → shell
+     * `am start` (только если startActivity упал, уведомление показать нельзя и
+     * adbd-сессия уже жива — поднимать её из этого пути нельзя, см. onDeeplink).
+     * Итог — одной строкой: raise=direct|fsi|shell|failed.
      */
-    private fun onDeeplink(client: SignalingClient, signal: Signal.Deeplink) {
-        val url = signal.url
+    private fun raiseBankId(url: String): Boolean {
+        val watcher = ForegroundAppWatcher(this)
+        val direct = runCatching {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+        if (direct.isSuccess) {
+            // Без usage-статистики проверить нечем — верим прямому старту (стоковый Android).
+            if (!watcher.hasPermission() || awaitBankIdForeground(watcher, DIRECT_VERIFY_MS)) {
+                android.util.Log.i(TAG_BANKID, "raise=direct")
+                return true
+            }
+        } else {
+            android.util.Log.w(TAG_BANKID, "direct start threw: ${direct.exceptionOrNull()?.message}")
+        }
+        // Путь «будильника»: FSI-уведомление выводит activity поверх всего даже на MIUI.
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        val canFsi = nm != null && nm.areNotificationsEnabled() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || nm.canUseFullScreenIntent())
+        if (canFsi) {
+            notify(Notifications.bankIdLaunch(this, url), Notifications.ID_BANKID_LAUNCH)
+            // Проверить нечем (нет usage-статистики) — верим пути «будильника»:
+            // уведомление гаснет по тапу (autoCancel) или через 2 минуты (timeoutAfter).
+            if (!watcher.hasPermission()) {
+                android.util.Log.i(TAG_BANKID, "raise=fsi")
+                return true
+            }
+            val ok = awaitBankIdForeground(watcher, FSI_VERIFY_MS)
+            cancel(Notifications.ID_BANKID_LAUNCH)
+            if (ok) {
+                android.util.Log.i(TAG_BANKID, "raise=fsi")
+                return true
+            }
+        }
+        // Последний резерв — shell (требует wireless debugging): только когда прямой
+        // старт упал, уведомление показать нельзя и сессия adbd УЖЕ жива. Иначе
+        // openDeeplink полез бы поднимать подключение (паринг, включение adb_wifi) —
+        // а с ним BankID работать отказывается.
+        if (direct.isFailure && !canFsi && ru.pult.grandma.control.AdbShell.hasLiveSession()) {
+            if (ru.pult.grandma.control.BankIdAgent.openDeeplink(url)) {
+                android.util.Log.i(TAG_BANKID, "raise=shell")
+                return true
+            }
+        }
+        android.util.Log.w(TAG_BANKID, "raise=failed")
+        return false
+    }
+
+    /** Ждать, пока com.bankid.bus окажется на переднем плане (UsageStats, как в ForegroundAppWatcher). */
+    private fun awaitBankIdForeground(watcher: ForegroundAppWatcher, timeoutMs: Long): Boolean {
+        if (!watcher.hasPermission()) return false
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (watcher.foregroundPackage() == ForegroundAppWatcher.BANKID_PACKAGE) return true
+            Thread.sleep(500)
+        }
+        return false
+    }
+
+    /**
+     * Диплинк от шлюз-приложения (канал /link): поднимаем BankID на передний план —
+     * без WebRTC-сессии. Вход завершаем сами (тачи через scrcpy-инъекцию BankIdAgent)
+     * только при уже живой shell-сессии: её подъём включал бы wireless debugging,
+     * а BankID с ней работать отказывается. PIN берём из настроек (задаётся один раз
+     * на телефоне, никуда не уходит).
+     */
+    private fun onDeeplink(client: SignalingClient, signal: Signal.Deeplink) =
+        handleDeeplink(client, signal.url)
+
+    /** Та же цепочка, но без шлюза: локальный диплинк pult://bankid-login (тесты). */
+    fun fireTestLogin(url: String) = handleDeeplink(null, url)
+
+    private fun handleDeeplink(client: SignalingClient?, url: String) {
+        android.util.Log.i("PultControl", "deeplink received by phone at ${System.currentTimeMillis()}")
         if (!url.startsWith("bankid:///")) {
-            client.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "not-a-bankid-url"))
+            client?.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "not-a-bankid-url"))
             return
         }
-        val pin = PultApp.prefs(this).getString(PREF_BANKID_PIN, "") ?: ""
+        // Дедупликация: тот же URL в течение 30 с не поднимаем повторно — вторая
+        // доставка сжигает autostart-token, и заказ умирает (наблюдалось на MIUI).
+        val now = System.currentTimeMillis()
+        if (url == lastDeeplinkUrl && now - lastDeeplinkAt < DEEPLINK_DEDUPE_MS) {
+            android.util.Log.i(TAG_BANKID, "raise=duplicate")
+            client?.send(Signal.DeeplinkStatus(ok = true, stage = "opened"))
+            return
+        }
+        lastDeeplinkUrl = url
+        lastDeeplinkAt = now
+        // Вход инициирован шлюзом — режим REMOTE: автоматика BankID разрешена (BankIdMode).
+        BankIdMode.onRemoteDeeplink()
+        // Горячо обновлённый dex-модуль может перехватить обработку диплинка целиком;
+        // тогда встроенный путь (BankIdAgent) не нужен.
+        if (ModuleRegistry.active?.onBankIdDeeplink(this, url) == true) {
+            client?.send(Signal.DeeplinkStatus(ok = true, stage = "signed"))
+            return
+        }
+        var pin = PinStorage.getBankIdPin(this)
+        var lockPin = PinStorage.getLockPin(this)
         if (pin.isEmpty()) {
-            client.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "no-pin-on-phone"))
-            return
+            // PIN finns inte sparad lokalt — visa BankID-lik skärm och vänta på användaren.
+            // Detta händer bara vid första användningen; därefter lagras PIN säkert på denna enhet.
+            pin = BankIdPinActivity.requestPin(this) ?: ""
+            if (pin.isEmpty()) {
+                client?.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "pin-cancelled"))
+                return
+            }
         }
-        val lockPin = PultApp.prefs(this).getString(PREF_LOCK_PIN, "") ?: ""
-        // Открываем через LanAgent (shell UID): startActivity из фонового сервиса
-        // на Android 14+ блокируется BAL. Запрос к агенту — TCP, сеть недоступна
-        // главному потоку не нужна: весь обработчик короткий, но сокет — да,
-        // поэтому весь блок — в фоне.
+        // Открытие диплинка — сначала напрямую (BAL-исключение SYSTEM_ALERT_WINDOW),
+        // затем FSI-уведомление; shell — последний резерв. Весь блок в фоне: проверка
+        // переднего плана спит, а shell-путь идёт через TCP-сокет агента — сеть и сон
+        // на главном потоке запрещены.
         Thread {
-            if (!ru.pult.grandma.control.BankIdAgent.openDeeplink(url)) {
-                client.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "bankid-open-failed"))
+            // BankID отказывается работать при включённой беспроводной отладке
+            // («Trådlös felsökning») — гасим её ДО подъёма. Неудача записи не блокирует.
+            // На MIUI это убивает adbd-листенер и вместе с ним живую shell-сессию,
+            // поэтому complete() на этом устройстве не срабатывает — ввод PIN делает
+            // ПК через scrcpy-инъекцию по USB (см. tools/scrcpy-inject.js).
+            val wifiOff = runCatching {
+                android.provider.Settings.Global.putString(contentResolver, "adb_wifi_enabled", "0")
+            }.getOrDefault(false)
+            android.util.Log.i(TAG_BANKID, "adb_wifi=off ok=$wifiOff")
+            // Флаг пишется асинхронно: adbd гаснет ~секунду. Ждём, пока adbd-сессия
+            // реально умрёт (LanShell не считаем — LanAgent не зависит от adbd) —
+            // иначе BankID при старте видит включённую отладку и показывает экран
+            // про bedrägerier (наблюдалось 09-09).
+            val offDeadline = System.currentTimeMillis() + 8_000
+            while (ru.pult.grandma.control.AdbShell.hasAdbSession()
+                && System.currentTimeMillis() < offDeadline) {
+                Thread.sleep(300)
+            }
+            android.util.Log.i(TAG_BANKID, "adb_wifi off confirmed=${!ru.pult.grandma.control.AdbShell.hasAdbSession()}")
+            // Мёртвая таска BankID (старая ошибка/протухший заказ) мешает новому:
+            // startActivity выводит её наверх со СТАРЫМ экраном. Убиваем заранее.
+            ru.pult.grandma.control.AdbShell.exec("am force-stop com.bankid.bus", 8_000)
+            Thread.sleep(600)
+            if (!raiseBankId(url)) {
+                client?.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "bankid-open-failed"))
                 return@Thread
             }
-            client.send(Signal.DeeplinkStatus(ok = true, stage = "opened"))
+            client?.send(Signal.DeeplinkStatus(ok = true, stage = "opened"))
+            // Автозавершение — только по УЖЕ живой shell-сессии: иначе ensureScrcpy
+            // включил бы wireless debugging (паринг/коннект), и BankID встал бы снова.
+            // Паринг и включение adb_wifi из этого пути недостижимы.
+            if (!ru.pult.grandma.control.AdbShell.hasLiveSession()) {
+                android.util.Log.i(TAG_BANKID, "complete skipped: no live shell")
+                return@Thread
+            }
             android.util.Log.i("PultControl", "deeplink opened, completing BankID locally")
             // Долгая последовательность (десятки секунд) — в этом же фоновом потоке.
             val err = ru.pult.grandma.control.BankIdAgent.complete(pin, lockPin)
             runCatching {
-                client.send(
+                client?.send(
                     if (err == null) Signal.DeeplinkStatus(ok = true, stage = "signed")
                     else Signal.DeeplinkStatus(ok = false, stage = "failed", err = err.take(120)),
                 )
@@ -771,28 +867,57 @@ class PultService : LifecycleService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         ServiceHeartbeat.Deaths.markDeath(this, "task-removed")
         ServiceHeartbeat.schedule(this)
-        val restart = PendingIntent.getForegroundService(
-            this,
-            2,
-            Intent(this, PultService::class.java),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        getSystemService(android.app.AlarmManager::class.java)?.set(
-            android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            android.os.SystemClock.elapsedRealtime() + 1000,
-            restart,
-        )
+        // Будим сторожа через секунду: точный будильник (с резервом-неточным) пробивает
+        // и Doze, и MIUI-отложки — тупой set() на 12+ может уехать на минуту.
+        scheduleRestart(1_000L, 2)
         super.onTaskRemoved(rootIntent)
+    }
+
+    /**
+     * Будильник «через delayMs разбуди сторожа». Идём через broadcast-сторожа, а не
+     * напрямую в сервис: на срабатывании сторож сам сверит, жив сервис или мёртв
+     * (FGS-старт мёртвым из фона на 12+ отклоняется — PultService.start это проглатывает,
+     * но зачем провоцировать отказ, если можно проверить заранее).
+     */
+    private fun scheduleRestart(delayMs: Long, requestCode: Int) {
+        val alarm = getSystemService(android.app.AlarmManager::class.java) ?: return
+        val wake = PendingIntent.getBroadcast(
+            this,
+            requestCode,
+            Intent(this, ServiceHeartbeat::class.java).setAction(ServiceHeartbeat.ACTION),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val at = android.os.SystemClock.elapsedRealtime() + delayMs
+        runCatching {
+            alarm.setExactAndAllowWhileIdle(
+                android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                at,
+                wake,
+            )
+        }.onFailure {
+            runCatching {
+                alarm.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, at, wake)
+            }
+        }
     }
 
     override fun onDestroy() {
         ServiceHeartbeat.Deaths.markDeath(this, "onDestroy")
+        // Сюда попадаем только при остановке системой (сами себя не гасим): планируем
+        // подъём, чтобы не ждать планового окна сторожа. При kill -9/onDestroy не вызовется —
+        // там работают crash-будильник и плановые сторожа.
+        scheduleRestart(1_000L, 3)
+        runCatching {
+            getSystemService(android.net.ConnectivityManager::class.java)
+                ?.unregisterNetworkCallback(networkCallback)
+        }
+        signalingOnline = false
         // Проекция живёт между сессиями, но не должна пережить сам сервис.
         controller?.releaseCapture()
+        qrWatcher.stop()
         tunnel?.stop()
         tunnel = null
         signaling?.close()
-        overlay?.hide()
         keepAlive.release()
         super.onDestroy()
     }
@@ -813,26 +938,58 @@ class PultService : LifecycleService() {
         }
     }
 
+    /** Подпись устройства для панели оператора: своя из настроек или «производитель модель» (≤40). */
+    private fun deviceLabel(): String {
+        val custom = PultApp.prefs(this).getString("device_label", null)?.trim().orEmpty()
+        val base = custom.ifEmpty { "${Build.MANUFACTURER} ${Build.MODEL}" }
+        return base.take(40)
+    }
+
+    /** Локальный IP-адрес устройства для отображения в B-app (Wi-Fi/LTE). */
+    private fun localIp(): String {
+        return try {
+            NetworkInterface.getNetworkInterfaces()
+                .toList()
+                .flatMap { it.inetAddresses.toList() }
+                .firstOrNull { !it.isLoopbackAddress && it.hostAddress?.contains(":") == false }
+                ?.hostAddress ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     companion object {
         private const val TAG = "PultService"
 
-        /** Настройка «под ключ»: включается семьёй при настройке (в бою — Device Owner). */
-        const val PREF_AUTO_ACCEPT = "auto_accept"
-
-        /** PIN BankID для локального завершения входа по диплинку (v2-шлюз). */
-        const val PREF_BANKID_PIN = "bankid_pin"
-
-        /** Код экрана блокировки headless-устройства: разблокировать перед BankID. */
-        const val PREF_LOCK_PIN = "lock_pin"
+        /** Подъём BankID по диплинку: прямой старт, проверка переднего плана, FSI, shell. */
+        private const val TAG_BANKID = "PultBankId"
+        private const val DIRECT_VERIFY_MS = 4_000L
+        private const val FSI_VERIFY_MS = 6_000L
+        private const val DEEPLINK_DEDUPE_MS = 30_000L
 
         const val ACTION_GRANT = "ru.pult.grandma.GRANT"
         const val ACTION_DENY = "ru.pult.grandma.DENY"
         const val ACTION_STOP_SESSION = "ru.pult.grandma.STOP_SESSION"
         const val ACTION_PAIR_CHANGED = "ru.pult.grandma.PAIR_CHANGED"
         const val ACTION_PAIR_ADB = "ru.pult.grandma.PAIR_ADB"
+        const val ACTION_TEST_LOGIN = "ru.pult.grandma.TEST_LOGIN"
+        const val EXTRA_URL = "test_url"
 
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+
+        /** Свежесть связи с сигналингом для тихого экрана статуса (MainActivity читает). */
+        @Volatile
+        var signalingOnline: Boolean = false
+            private set
+
+        /** Жив ли сервис прямо сейчас. Плановые сторожа и a11y-вахта сверяются этим. */
+        fun isRunning(context: Context): Boolean {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                ?: return false
+            return am.getRunningServices(Integer.MAX_VALUE)
+                .any { it.service.className == PultService::class.java.name }
+        }
 
         fun start(context: Context) {
             // API 31+: система запрещает старт FGS, когда процесс подняли в фоне
@@ -864,6 +1021,15 @@ class PultService : LifecycleService() {
         fun pairChanged(context: Context) {
             context.startService(
                 Intent(context, PultService::class.java).setAction(ACTION_PAIR_CHANGED),
+            )
+        }
+
+        /** Локальный вход BankID по нашему диплинку (pult://bankid-login?url=...). */
+        fun fireTestLogin(context: Context, url: String) {
+            context.startService(
+                Intent(context, PultService::class.java)
+                    .setAction(ACTION_TEST_LOGIN)
+                    .putExtra(EXTRA_URL, url),
             )
         }
     }

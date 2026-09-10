@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Загруженные обновления: системный установщик читает APK через content://. -->
+<paths>
+    <files-path name="updates" path="updates/" />
+    <external-files-path name="external-updates" path="updates/" />
+</paths>

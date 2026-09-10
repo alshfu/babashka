@@ -70,6 +70,12 @@ class SignalingClient(
         val role: String,
         val deviceId: String,
         val journalTokenHash: String? = null,
+        // Подпись устройства для панели оператора (label) и модель — уходят в hello.
+        val label: String? = null,
+        val model: String? = null,
+        // ОС и IP-адрес устройства — для списка A-appar i B-appen.
+        val os: String? = null,
+        val ip: String? = null,
     )
 
     enum class Link { OFFLINE, CONNECTING, ONLINE }
@@ -103,6 +109,19 @@ class SignalingClient(
 
     fun send(signal: Signal): Boolean = socket?.send(SignalCodec.encode(signal)) ?: false
 
+    /**
+     * Мгновенное переподключение по смене сети (ConnectivityManager-сторож в PultService).
+     * Сбрасывает backoff до минимума и пробует немедленно, минуя растущие паузы. Живой
+     * сокет (ONLINE) не трогаем: ложные срабатывания колбэка сети не должны рвать рабочую
+     * связь, а мёртвый сокет сам рухнет по ping. Ротация эндпоинтов не меняется.
+     */
+    fun forceReconnectNow() {
+        if (stopped || _link.value == Link.ONLINE) return
+        attempt = 0
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch { openSocket() }
+    }
+
     private fun openSocket() {
         _link.value = Link.CONNECTING
         val request = Request.Builder().url(currentUrl).build()
@@ -117,12 +136,17 @@ class SignalingClient(
                             role = identity.role,
                             deviceId = identity.deviceId,
                             journalTokenHash = identity.journalTokenHash,
+                            label = identity.label,
+                            model = identity.model,
+                            os = identity.os,
+                            ip = identity.ip,
                         ),
                     ),
                 )
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                android.util.Log.i("PultWs", "onMessage at ${System.currentTimeMillis()} type=${text.take(40)}")
                 // Неразобранное сообщение молча пропускаем: рвать связь бабушке из-за
                 // непонятного кадра — худшее, что можно сделать посреди помощи.
                 val signal = SignalCodec.decodeOrNull(text) ?: return

@@ -29,7 +29,7 @@ if (!TOKEN) {
   console.error('нужен токен канала: --token <AGENT_TOKEN> или env AGENT_TOKEN');
   process.exit(1);
 }
-const SERVER = arg('--server', 'wss://89-127-235-17.sslip.io');
+const SERVER = arg('--server', 'wss://85.190.98.57.sslip.io:8445');
 const PAIR_ID = arg('--pair-id', 'demo-pair-000000000000');
 const BANKID_PIN = arg('--bankid-pin', '');
 const LOCK_PIN = arg('--lock-pin', '');

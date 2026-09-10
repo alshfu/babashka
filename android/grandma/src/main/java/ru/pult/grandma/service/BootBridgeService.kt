@@ -22,7 +22,7 @@ class BootBridgeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(
             Notifications.ID_STATUS,
-            Notifications.status(this, null, connected = false),
+            Notifications.status(this, connected = false),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
         )
         PultService.start(this)

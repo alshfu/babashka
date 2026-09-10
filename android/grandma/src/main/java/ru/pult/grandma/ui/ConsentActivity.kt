@@ -5,135 +5,48 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import android.view.View
-import android.widget.Button
-import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import ru.pult.grandma.BuildConfig
-import ru.pult.grandma.R
 import ru.pult.grandma.service.PultService
 
 /**
- * «Петя хочет помочь» — единственное действие бабушки.
+ * Системное согласие на захват экрана — единственный диалог, который вообще может
+ * появиться. Своего UI у activity нет: это невидимый трамплин к системному диалогу
+ * `MediaProjection` (песочница: запросы спаренного помощника принимаются автоматически).
  *
- * Экран показывается поверх блокировки и включает дисплей: запрос, которого не видно,
- * бесполезен. Кнопка «Разрешить» занимает большую часть экрана, «Не сейчас» — мелкая
- * и без последствий (docs/android-grandma.md §1).
- *
- * Опции «разрешать всегда» здесь нет и не будет: постоянный доступ — это уже не помощь.
+ * Нужна один раз: проекция живёт между сессиями (PultService), поэтому дальше показ
+ * начинается молча. При выданном заранее appop PROJECT_MEDIA (выставляется при настройке
+ * устройства) система не показывает и свой диалог — разрешение возвращается сразу.
  */
-class ConsentActivity : AppCompatActivity() {
-
-    /**
-     * Мы сами увели экран согласия в фон, открыв системный диалог захвата.
-     * Без этого флага отказ по умолчанию из `onPause` сработал бы на собственный
-     * системный диалог — и «Разрешить» превращалось бы в «Не сейчас».
-     */
-    private var awaitingCapturePermission = false
-    private var autoMode = false
-
-    private val captureRequest = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        // Системный диалог захвата спрашиваем ПОСЛЕ понятного вопроса от нас,
-        // иначе бабушка видит непонятное системное окно раньше своего.
-        awaitingCapturePermission = false
-        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
-            PultService.grant(this, result.resultCode, result.data)
-        } else {
-            // Отказалась в системном диалоге — это тоже «не сейчас», а не ошибка.
-            PultService.deny(this)
-        }
-        finish()
-    }
+class ConsentActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_consent)
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        runCatching { startActivityForResult(manager.createScreenCaptureIntent(), REQ) }
+            .onFailure { PultService.deny(this); finish() }
+    }
 
-        val peerName = intent.getStringExtra(EXTRA_PEER) ?: "Помощник"
-        val note = intent.getStringExtra(EXTRA_NOTE)
-        val auto = intent.getBooleanExtra(EXTRA_AUTO, false)
-
-        findViewById<TextView>(R.id.title).text = getString(R.string.consent_title, peerName)
-        findViewById<TextView>(R.id.note).apply {
-            text = note.orEmpty()
-            visibility = if (note.isNullOrBlank()) View.GONE else View.VISIBLE
-        }
-
-        autoMode = auto
-        val allow = findViewById<Button>(R.id.allow)
-        val deny = findViewById<Button>(R.id.deny)
-
-        if (auto && BuildConfig.DEBUG) {
-            // В отладке не показываем экран согласия вовсе: на этапе разработки
-            // телефоном никто не сидит, а PROJECT_MEDIA уже выдан через appops.
-            // Activity остаётся жива, чтобы ActivityResultLauncher доставил результат
-            // захвата; UI и фон окна делаем прозрачными, чтобы не было вспышки.
-            findViewById<View>(android.R.id.content).alpha = 0f
-            window?.setBackgroundDrawableResource(android.R.color.transparent)
-            allow.post { launchCapture() }
-        } else if (auto) {
-            // Турнкей-режим: бабушка ничего не нажимает. Но она ВИДИТ, кто подключается —
-            // короткое неинтерактивное сообщение, потом показ начинается сам. Это и есть
-            // граница легальности: не «тихо», а «без действий с её стороны».
-            allow.text = getString(R.string.consent_auto, peerName)
-            allow.isEnabled = false
-            deny.visibility = View.GONE
-            allow.postDelayed({ launchCapture() }, AUTO_NOTICE_MS)
-        } else {
-            allow.setOnClickListener { launchCapture() }
-            deny.setOnClickListener {
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ) {
+            if (resultCode == RESULT_OK && data != null) {
+                PultService.grant(this, resultCode, data)
+            } else {
+                // Отказ в системном диалоге — это «не сейчас», а не ошибка.
                 PultService.deny(this)
-                finish()
             }
         }
-    }
-
-    private fun launchCapture() {
-        // Авто-запуск приходит по таймеру: к этому моменту activity могла уже уйти
-        // (замена singleTask, разворот, уход с экрана). Тогда launcher не зарегистрирован
-        // и launch() падает — просто выходим, сессия начнётся с нового запроса.
-        // Достаточно, чтобы activity была жива и зарегистрировала launcher (CREATED+).
-        // Требовать RESUMED нельзя: на MIUI окно кратко теряет фокус, и запуск сорвался бы.
-        if (isFinishing || isDestroyed) return
-        val manager = getSystemService(MediaProjectionManager::class.java)
-        awaitingCapturePermission = true
-        // При выданном appop PROJECT_MEDIA (Device Owner) система не показывает свой диалог
-        // и сразу возвращает разрешение — бабушка его не видит.
-        runCatching { captureRequest.launch(manager.createScreenCaptureIntent()) }
-            .onFailure { awaitingCapturePermission = false; PultService.deny(this); finish() }
-    }
-
-    /**
-     * Отказ по умолчанию (ручной режим): бабушка ушла с экрана → сессии нет.
-     * НЕ применяется в авто-режиме (семья настроила автосогласие) и во время нашего
-     * собственного системного диалога захвата — иначе на MIUI кратковременная потеря
-     * фокуса ложно отменяла бы согласие.
-     */
-    override fun onPause() {
-        super.onPause()
-        if (isFinishing || awaitingCapturePermission || autoMode) return
-        PultService.deny(this)
         finish()
     }
 
     companion object {
-        private const val EXTRA_PEER = "peer"
-        private const val EXTRA_NOTE = "note"
-        private const val EXTRA_AUTO = "auto"
+        private const val REQ = 7002
 
-        /** Сколько бабушка видит «Петя подключается», прежде чем показ начнётся сам. */
-        private const val AUTO_NOTICE_MS = 2000L
-
-        fun show(context: Context, peerName: String, note: String?, auto: Boolean) {
+        /** Запросить системное согласие на захват (первый запуск, проекции ещё нет). */
+        fun requestCapture(context: Context) {
             context.startActivity(
                 Intent(context, ConsentActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    .putExtra(EXTRA_PEER, peerName)
-                    .putExtra(EXTRA_NOTE, note)
-                    .putExtra(EXTRA_AUTO, auto),
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
         }
     }

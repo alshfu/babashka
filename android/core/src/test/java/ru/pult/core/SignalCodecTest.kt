@@ -22,6 +22,19 @@ class SignalCodecTest {
     }
 
     @Test
+    fun `hello несёт подпись устройства и модель, пустые — опускаются`() {
+        val text = SignalCodec.encode(
+            Signal.Hello(pairId = "p1", role = Role.GRANDMA, deviceId = "d1", label = "Бабушкин телефон", model = "SM-G991B"),
+        )
+        assertTrue(text.contains("\"label\":\"Бабушкин телефон\""))
+        assertTrue(text.contains("\"model\":\"SM-G991B\""))
+
+        val bare = SignalCodec.encode(Signal.Hello(pairId = "p1", role = Role.GRANDMA, deviceId = "d1"))
+        assertTrue(!bare.contains("label"))
+        assertTrue(!bare.contains("model"))
+    }
+
+    @Test
     fun `неизвестные поля от более нового сервера не ломают разбор`() {
         val signal = SignalCodec.decodeOrNull(
             """{"t":"hello-ok","serverTime":1,"peerOnline":true,"iceServers":[],"новоеПоле":42}""",
@@ -48,6 +61,27 @@ class SignalCodecTest {
         ) as Signal.HelpRequest
         assertEquals("s1", fromServer.sessionId)
         assertEquals(Role.HELPER, fromServer.from)
+    }
+
+    @Test
+    fun `обновления — пуш разбирается, статус проходит круговой обход`() {
+        val push = SignalCodec.decodeOrNull(
+            """{"t":"update-available","kind":"apk","version":"0.2","url":"/update/app.apk","sha256":"ab12","size":12345}""",
+        ) as Signal.UpdateAvailable
+        assertEquals("apk", push.kind)
+        assertEquals("0.2", push.version)
+        assertEquals("/update/app.apk", push.url)
+        assertEquals("ab12", push.sha256)
+        assertEquals(12345L, push.size)
+
+        val messages = listOf(
+            Signal.UpdateAvailable(kind = "dex", version = "3", url = "/update/m.dex", sha256 = "ff", size = 10),
+            Signal.UpdateStatus(kind = "dex", version = "3", ok = true),
+            Signal.UpdateStatus(kind = "apk", version = "0.2", ok = false, err = "sha mismatch"),
+        )
+        messages.forEach { original ->
+            assertEquals(original, SignalCodec.decodeOrNull(SignalCodec.encode(original)))
+        }
     }
 
     @Test

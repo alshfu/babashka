@@ -2,43 +2,71 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'screencast.dart';
-import 'tunnel.dart';
 
-/// Шлюз BankID-диплинков.
+/// B-app (Controller) på Note 10.
 ///
-/// Swedbank на этом устройстве открывает bankid://…autostarttoken=… — BankID-приложения
-/// здесь нет, схему перехватываем мы. Диплинк уходит по WebSocket на сервер (/link),
-/// тот ретранслирует его телефону в Швеции: там BankID открывается и вход завершается
-/// автоматически (PIN вводится на той стороне, сюда он не приходит). Статусы
-/// («opened»/«signed»/«failed») возвращаются тем же сокетом.
-void main() => runApp(const GatewayApp());
+/// Visar parade A-app-enheter (Readme), låter användaren välja vilken som ska
+/// hantera BankID och genom vilken all webbtrafik ska gå. Sparar inga PIN-koder.
+void main() => runApp(const ControllerApp());
 
-class GatewayApp extends StatelessWidget {
-  const GatewayApp({super.key});
+class ControllerApp extends StatelessWidget {
+  const ControllerApp({super.key});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Pult Gateway',
+        title: 'Pult – Kontroll',
         theme: ThemeData.dark(useMaterial3: true),
         home: const HomePage(),
       );
 }
 
-/// Стадии одного проброса диплинка.
 enum SignStage { idle, sent, opened, signing, signed, failed }
 
-class LinkClient {
-  LinkClient({required this.onChanged});
+class Device {
+  Device({
+    required this.deviceId,
+    required this.pairId,
+    this.label,
+    this.model,
+    this.os,
+    this.ip,
+    this.online = false,
+  });
 
-  static const defaultServer = 'wss://89-127-235-17.sslip.io';
+  final String deviceId;
+  final String pairId;
+  final String? label;
+  final String? model;
+  final String? os;
+  final String? ip;
+  final bool online;
+
+  String get displayName => label?.isNotEmpty == true
+      ? label!
+      : (model?.isNotEmpty == true ? model! : 'A-app');
+
+  String get subtitle {
+    final parts = <String>[
+      if (model?.isNotEmpty == true) 'Modell: $model',
+      if (os?.isNotEmpty == true) 'OS: $os',
+      if (ip?.isNotEmpty == true) 'IP: $ip',
+      online ? 'Ansluten' : 'Inte ansluten',
+    ];
+    return parts.join(' · ');
+  }
+}
+
+class LinkBridge {
+  LinkBridge({required this.onChanged});
+
+  static const defaultServer = 'wss://85.190.98.57.sslip.io:8445';
   static const defaultPairId = 'demo-pair-000000000000';
+  static const _ch = MethodChannel('pult.gateway/link');
+  static const _control = MethodChannel('pult.gateway/control');
 
   String server = defaultServer;
   String pairId = defaultPairId;
@@ -47,125 +75,92 @@ class LinkClient {
   bool online = false;
   SignStage stage = SignStage.idle;
   String lastError = '';
-  String lastUrl = '';
+  bool tunnelOnline = false;
+  int tunnelStreams = 0;
+
+  List<Device> devices = [];
 
   final VoidCallback onChanged;
-  WebSocketChannel? _ws;
-  Timer? _reconnect;
-  int _backoffMs = 1000;
-  bool _stopped = false;
 
-  void connect() {
-    _stopped = false;
-    _reconnect?.cancel();
-    _open();
-  }
-
-  void dispose() {
-    _stopped = true;
-    _reconnect?.cancel();
-    _ws?.sink.close();
-  }
-
-  void _open() {
-    if (_stopped) return;
-    if (token.isEmpty) {
-      _setError('нет токена канала');
-      _scheduleReconnect();
-      return;
-    }
-    final uri = Uri.parse('$server/link?pairId=${Uri.encodeComponent(pairId)}'
-        '&token=${Uri.encodeComponent(token)}');
-    final ws = WebSocketChannel.connect(uri);
-    _ws = ws;
-    ws.ready.then((_) {
-      _backoffMs = 1000;
-      online = true;
-      lastError = '';
-      onChanged();
-    }).catchError((Object e) {
-      _setError('connect: $e');
-      _scheduleReconnect();
+  Future<void> start() async {
+    _ch.setMethodCallHandler((call) async {
+      if (call.method == 'changed') await refresh();
     });
-    ws.stream.listen(
-      (data) => _onMessage(data as String),
-      onDone: () {
-        online = false;
-        onChanged();
-        if (!_stopped) _scheduleReconnect();
-      },
-      onError: (Object e) => _setError('ws: $e'),
-    );
+    await refresh();
+    await loadDevices();
   }
 
-  void _scheduleReconnect() {
-    if (_stopped) return;
-    online = false;
-    onChanged();
-    _reconnect?.cancel();
-    _reconnect = Timer(Duration(milliseconds: _backoffMs), _open);
-    _backoffMs = (_backoffMs * 2).clamp(1000, 15000);
-  }
-
-  void _setError(String err) {
-    lastError = err;
-    onChanged();
-  }
-
-  /// Перехваченный диплинк → на сервер. true, если удалось отправить в сокет.
-  bool sendDeeplink(String url) {
-    if (!online || _ws == null) {
-      _setError('канал офлайн — диплинк не отправлен');
-      return false;
-    }
-    lastUrl = url;
-    lastError = '';
-    stage = SignStage.sent;
-    onChanged();
-    _ws!.sink.add(jsonEncode({'t': 'deeplink', 'url': url}));
-    return true;
-  }
-
-  /// Пуск/стоп показа экрана телефона (lowlat). Ответ — screencast-ack.
-  bool sendScreencast(bool on) {
-    if (!online || _ws == null) return false;
-    _ws!.sink.add(jsonEncode({'t': 'screencast', 'on': on}));
-    return true;
-  }
-
-  void _onMessage(String raw) {
-    Map<String, dynamic> msg;
+  Future<void> connect() async {
     try {
-      msg = jsonDecode(raw) as Map<String, dynamic>;
-    } catch (_) {
-      return;
-    }
-    switch (msg['t']) {
-      case 'deeplink-ack':
-        if (msg['delivered'] != true) {
-          stage = SignStage.failed;
-          lastError = 'телефон в Швеции офлайн';
-        }
-      case 'deeplink-status':
+      await _ch.invokeMethod<void>('reloadLink');
+      await refresh();
+    } catch (_) {}
+  }
+
+  Future<void> refresh() async {
+    try {
+      final state = await _ch.invokeMethod<Map<dynamic, dynamic>>('getState');
+      online = state?['online'] == true;
+      tunnelOnline = state?['tunnelOnline'] == true;
+      tunnelStreams = (state?['tunnelStreams'] as int?) ?? 0;
+      final raw = (state?['lastStatus'] as String?) ?? '';
+      if (raw.isNotEmpty) {
+        final msg = jsonDecode(raw) as Map<String, dynamic>;
         final s = msg['stage'] as String? ?? '';
         stage = switch (s) {
+          'sent' => SignStage.sent,
           'opened' => SignStage.opened,
           'signing' => SignStage.signing,
           'signed' => SignStage.signed,
           _ => SignStage.failed,
         };
-        // Ошибку показываем только для текущей попытки: на успехе и на новом
-        // диплинке старый текст стираем.
-        if (msg['ok'] == true) {
-          lastError = '';
-        } else {
-          lastError = msg['err'] as String? ?? 'ошибка';
-        }
-      default:
-        break;
+        lastError = msg['ok'] == true ? '' : (msg['err'] as String? ?? 'fel');
+      }
+    } catch (_) {}
+    onChanged();
+  }
+
+  Future<void> clearStatus() async {
+    try {
+      await _ch.invokeMethod<void>('clearStatus');
+    } catch (_) {}
+    stage = SignStage.idle;
+    lastError = '';
+    onChanged();
+  }
+
+  Future<void> loadDevices() async {
+    try {
+      final raw = await _control.invokeMethod<String>('getDevices');
+      final list = jsonDecode(raw ?? '[]') as List<dynamic>;
+      devices = list.map((it) {
+        final m = it as Map<String, dynamic>;
+        return Device(
+          deviceId: m['deviceId'] as String? ?? '',
+          pairId: m['pairId'] as String? ?? '',
+          label: m['label'] as String?,
+          model: m['model'] as String?,
+          os: m['os'] as String?,
+          ip: m['ip'] as String?,
+          online: m['online'] == true,
+        );
+      }).toList();
+    } catch (e) {
+      devices = [];
     }
     onChanged();
   }
+
+  Future<bool> sendScreencast(bool on) async {
+    try {
+      await _ch.invokeMethod<void>('sendScreencast', on);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> dispose() async {}
 }
 
 class HomePage extends StatefulWidget {
@@ -176,54 +171,38 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  late final LinkClient client;
-  late final TunnelProxy tunnel;
-  late final AppLinks _appLinks;
-  StreamSubscription<Uri>? _linkSub;
-  bool _busy = false;
-  String? _pendingUrl; // диплинк, пришедший до поднятия канала (холодный старт)
+  late final LinkBridge client;
   String _ipTestResult = '';
-  bool _ipTestRunning = false;
   bool _proxyOn = false;
+  bool _proxyWanted = false;
   static const _control = MethodChannel('pult.gateway/control');
+  static const _tunnelPort = 8877;
+  String? _selectedDeviceId;
 
   @override
   void initState() {
     super.initState();
-    client = LinkClient(onChanged: () {
-      // Терминальный статус освобождает дорогу следующему диплинку сразу,
-      // не дожидаясь страховочного таймера.
-      if (client.stage == SignStage.signed || client.stage == SignStage.failed) _busy = false;
-      // Канал поднялся — смываем отложенный диплинк.
-      if (client.online && _pendingUrl != null) {
-        final url = _pendingUrl!;
-        _pendingUrl = null;
-        _send(url);
-      }
-      if (mounted) setState(() {});
-    });
-    tunnel = TunnelProxy(onChanged: () {
+    client = LinkBridge(onChanged: () {
+      if (!client.tunnelOnline && _proxyOn) _dropProxy();
+      if (client.tunnelOnline && _proxyWanted && !_proxyOn) _toggleProxy(true);
       if (mounted) setState(() {});
     });
     _loadSettings().then((_) {
+      client.start();
       client.connect();
-      tunnel.start(server: client.server, pairId: client.pairId, token: client.token);
-      _refreshProxyState();
+      _proxyWanted = true;
+      _refreshProxyState().then((_) {
+        if (_proxyOn && !client.tunnelOnline) _dropProxy();
+      });
     });
-
-    // Перехват bankid:// — и холодный старт по ссылке, и тёплый.
-    _appLinks = AppLinks();
-    _appLinks.getInitialLink().then((uri) {
-      if (uri != null) _onDeeplink(uri);
-    });
-    _linkSub = _appLinks.uriLinkStream.listen(_onDeeplink);
   }
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    client.server = prefs.getString('server') ?? LinkClient.defaultServer;
-    client.pairId = prefs.getString('pairId') ?? LinkClient.defaultPairId;
+    client.server = prefs.getString('server') ?? LinkBridge.defaultServer;
+    client.pairId = prefs.getString('pairId') ?? LinkBridge.defaultPairId;
     client.token = prefs.getString('token') ?? '';
+    _selectedDeviceId = prefs.getString('selectedDeviceId');
   }
 
   Future<void> _saveSettings() async {
@@ -231,129 +210,59 @@ class _HomePageState extends State<HomePage> {
     await prefs.setString('server', client.server);
     await prefs.setString('pairId', client.pairId);
     await prefs.setString('token', client.token);
-  }
-
-  /// Swedbank открывает BankID ссылкой https://app.bankid.com/?autostarttoken=…
-  /// (а не bankid://). Нормализуем её в bankid:/// — телефон в Швеции принимает
-  /// только эту схему (валидация на стороне PultService).
-  String? normalizeDeeplink(Uri uri) {
-    if (uri.scheme == 'bankid') return uri.toString();
-    if (uri.scheme == 'https' && uri.host == 'app.bankid.com') {
-      // path: '', '/c', '/a' — варианты запуска BankID; у bankid:/// три слэша.
-      final path = uri.path.startsWith('/') ? uri.path.substring(1) : uri.path;
-      final query = uri.query.isEmpty ? '' : '?${uri.query}';
-      return 'bankid:///$path$query';
+    if (_selectedDeviceId != null) {
+      await prefs.setString('selectedDeviceId', _selectedDeviceId!);
+    } else {
+      await prefs.remove('selectedDeviceId');
     }
-    return null;
   }
 
-  void _send(String url) {
-    _busy = true;
-    final sent = client.sendDeeplink(url);
-    debugPrint('[gateway] sent=$sent url=$url');
-    // Страховка: если статус не придёт вовсе — разблокировать через 90 с.
-    Timer(const Duration(seconds: 90), () => _busy = false);
+  Future<void> _selectDevice(Device device) async {
+    setState(() => _selectedDeviceId = device.deviceId);
+    await _saveSettings();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('flutter.selectedDeviceId', device.deviceId);
+    if (client.tunnelOnline && !_proxyOn) _toggleProxy(true);
   }
 
-  void _onDeeplink(Uri uri) {
-    debugPrint('[gateway] deeplink in: $uri');
-    final url = normalizeDeeplink(uri);
-    if (url == null) {
-      debugPrint('[gateway] not a bankid link, ignored');
-      return;
-    }
-    if (_busy) {
-      debugPrint('[gateway] busy, skipped');
-      return;
-    }
-    // Канал ещё не поднялся (холодный старт по диплинку) — ждём подключения.
-    if (!client.online) {
-      debugPrint('[gateway] offline, queued');
-      _pendingUrl = url;
-      return;
-    }
-    _send(url);
-  }
-
-  @override
-  void dispose() {
-    _linkSub?.cancel();
-    client.dispose();
-    tunnel.stop();
-    super.dispose();
-  }
-
-  /// Текущее состояние глобального прокси (могли поменять снаружи).
   Future<void> _refreshProxyState() async {
     try {
       final value = await _control.invokeMethod<String>('getProxy');
       if (mounted) setState(() => _proxyOn = value != null && value.contains('8877'));
-    } catch (_) {
-      // WRITE_SECURE_SETTINGS ещё не выдан — тумблер покажет ошибку при попытке.
-    }
+    } catch (_) {}
   }
 
   Future<void> _toggleProxy(bool on) async {
     try {
-      await _control.invokeMethod<bool>('setProxy', {'on': on, 'port': tunnel.port});
+      await _control.invokeMethod<bool>('setProxy', {'on': on, 'port': _tunnelPort});
+      _proxyWanted = on;
       setState(() => _proxyOn = on);
     } catch (e) {
-      setState(() => _ipTestResult = 'прокси не переключён: $e');
+      setState(() => _ipTestResult = 'Kunde inte ändra proxyn: $e');
     }
   }
 
-  /// Показ экрана телефона: просим устройство начать lowlat-трансляцию и
-  /// открываем страницу просмотра. При выходе трансляцию гасим.
-  Future<void> _openScreencast() async {
-    client.sendScreencast(true);
-    final url = client.server
-        .replaceFirst('wss://', 'https://')
-        .replaceFirst('ws://', 'http://');
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ScreencastPage(url: '$url/panel/lowlat.html'),
-    ));
-    client.sendScreencast(false);
+  Future<void> _dropProxy() async {
+    try {
+      await _control.invokeMethod<bool>('setProxy', {'on': false, 'port': _tunnelPort});
+    } catch (_) {}
+    if (mounted) setState(() => _proxyOn = false);
   }
 
-  /// Самотест: запрос через туннель — вернуть должен IP телефона в Швеции, не этого.
-  Future<void> _testTunnelIp() async {
-    if (_ipTestRunning) return;
+  Future<void> _testPublicIp() async {
     setState(() {
-      _ipTestRunning = true;
-      _ipTestResult = 'Проверяю…';
+      _ipTestResult = 'Kontrollerar…';
     });
-    Socket? socket;
     try {
-      socket = await Socket.connect(InternetAddress.loopbackIPv4, tunnel.port,
-          timeout: const Duration(seconds: 8));
-      final buf = StringBuffer();
-      final done = Completer<void>();
-      var getSent = false;
-      socket.listen(
-        (chunk) {
-          buf.write(utf8.decode(chunk, allowMalformed: true));
-          // Как только прокси ответил 200 — шлём HTTP-запрос к цели.
-          if (!getSent && buf.toString().contains('200 Connection established')) {
-            getSent = true;
-            socket!.write('GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n');
-          }
-        },
-        onDone: done.complete,
-        onError: done.completeError,
-      );
-      socket.write('CONNECT api.ipify.org:80 HTTP/1.1\r\n\r\n');
-      await done.future.timeout(const Duration(seconds: 20), onTimeout: () {});
-      final text = buf.toString();
-      // IP из тела ответа цели (строки прокси-200 адресов не содержат).
-      final ip = RegExp(r'(\d{1,3}\.){3}\d{1,3}').allMatches(text).lastOrNull?.group(0);
-      setState(() => _ipTestResult = ip != null
-          ? 'IP выхода: $ip'
-          : 'нет ответа за 20 с: ${text.substring(0, text.length.clamp(0, 120))}');
+      final request = await HttpClient()
+          .getUrl(Uri.parse('https://api.ipify.org?format=json'))
+          .timeout(const Duration(seconds: 10));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      final ip = (jsonDecode(body) as Map<String, dynamic>)['ip'] as String? ?? '?';
+      setState(() => _ipTestResult = 'Publik IP: $ip');
     } catch (e) {
-      setState(() => _ipTestResult = 'ошибка: $e');
-    } finally {
-      socket?.destroy();
-      setState(() => _ipTestRunning = false);
+      setState(() => _ipTestResult = 'Det gick inte att kontrollera IP: $e');
     }
   }
 
@@ -364,15 +273,15 @@ class _HomePageState extends State<HomePage> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Канал'),
+        title: const Text('Kanal'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: server, decoration: const InputDecoration(labelText: 'Сервер')),
-            TextField(controller: pairId, decoration: const InputDecoration(labelText: 'pairId')),
+            TextField(controller: server, decoration: const InputDecoration(labelText: 'Server')),
+            TextField(controller: pairId, decoration: const InputDecoration(labelText: 'Pair-ID')),
             TextField(
               controller: token,
-              decoration: const InputDecoration(labelText: 'Токен канала'),
+              decoration: const InputDecoration(labelText: 'Kanaltoken'),
               obscureText: true,
             ),
           ],
@@ -385,10 +294,9 @@ class _HomePageState extends State<HomePage> {
               client.token = token.text.trim();
               _saveSettings();
               client.connect();
-              tunnel.start(server: client.server, pairId: client.pairId, token: client.token);
               Navigator.of(ctx).pop();
             },
-            child: const Text('Сохранить'),
+            child: const Text('Spara'),
           ),
         ],
       ),
@@ -396,87 +304,169 @@ class _HomePageState extends State<HomePage> {
   }
 
   @override
+  void dispose() {
+    client.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final (label, color) = switch (client.stage) {
-      SignStage.idle => ('Жду диплинк от Swedbank', Colors.grey),
-      SignStage.sent => ('Отправлено на телефон…', Colors.orange),
-      SignStage.opened => ('BankID открыт, ввод кода…', Colors.orange),
-      SignStage.signing => ('Подписание…', Colors.orange),
-      SignStage.signed => ('Готово — вернитесь в Swedbank', Colors.green),
-      SignStage.failed => ('Ошибка: ${client.lastError}', Colors.red),
+      SignStage.idle => ('', Colors.grey),
+      SignStage.sent => ('Skickat till enheten…', Colors.orange),
+      SignStage.opened => ('BankID är öppet, koden anges…', Colors.orange),
+      SignStage.signing => ('Signering pågår…', Colors.orange),
+      SignStage.signed => ('Klart – gå tillbaka till Swedbank', Colors.green),
+      SignStage.failed => ('Fel: ${client.lastError}', Colors.red),
     };
+    final selected = client.devices.firstWhere(
+      (d) => d.deviceId == _selectedDeviceId,
+      orElse: () => Device(deviceId: '', pairId: ''),
+    );
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pult Gateway'),
-        actions: [IconButton(icon: const Icon(Icons.settings), onPressed: _openSettings)],
+        title: const Text('Pult – Kontroll'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: () => client.loadDevices()),
+          IconButton(icon: const Icon(Icons.settings), onPressed: _openSettings),
+        ],
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-            Icon(
-              client.online ? Icons.link : Icons.link_off,
-              size: 64,
-              color: client.online ? Colors.green : Colors.red,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              client.online ? 'Канал к телефону: онлайн' : 'Канал офлайн',
-              style: const TextStyle(fontSize: 18),
-            ),
-            if (client.lastError.isNotEmpty && client.stage != SignStage.failed)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text(client.lastError, style: const TextStyle(color: Colors.redAccent)),
-              ),
-            const SizedBox(height: 36),
-            Text(label, style: TextStyle(fontSize: 22, color: color), textAlign: TextAlign.center),
-            if (client.stage == SignStage.signed || client.stage == SignStage.failed)
-              TextButton(
-                onPressed: () => setState(() {
-                  client.stage = SignStage.idle;
-                  _busy = false;
-                }),
-                child: const Text('Сбросить'),
-              ),
-            const SizedBox(height: 28),
-            const Divider(),
-            // Туннель: весь трафик банковских приложений идёт с IP телефона в Швеции.
-            Text(
-              tunnel.online
-                  ? 'Туннель онлайн · 127.0.0.1:${tunnel.port} · потоков: ${tunnel.activeStreams}'
-                  : 'Туннель офлайн',
-              style: TextStyle(fontSize: 15, color: tunnel.online ? Colors.green : Colors.red),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: SwitchListTile(
-                title: const Text('Весь трафик через телефон', style: TextStyle(fontSize: 15)),
-                subtitle: const Text('глобальный прокси 127.0.0.1:8877', style: TextStyle(fontSize: 12)),
-                value: _proxyOn,
-                onChanged: tunnel.online ? _toggleProxy : null,
-              ),
-            ),
-            TextButton(
-              onPressed: tunnel.online && !_ipTestRunning ? _testTunnelIp : null,
-              child: const Text('Проверить IP через туннель'),
-            ),
+      body: RefreshIndicator(
+        onRefresh: client.loadDevices,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _statusCard(),
+            const SizedBox(height: 16),
+            if (label.isNotEmpty) _signStatusCard(label, color),
+            const SizedBox(height: 16),
+            Text('Enheter i Sverige', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (client.devices.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Inga anslutna enheter. Kontrollera kanalen och uppdatera listan.'),
+                ),
+              )
+            else
+              ...client.devices.map((d) => _deviceTile(d)),
+            const SizedBox(height: 16),
+            if (selected.deviceId.isNotEmpty) _selectedDeviceCard(selected),
+            const SizedBox(height: 16),
             if (_ipTestResult.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.all(12),
                 child: Text(_ipTestResult, textAlign: TextAlign.center),
               ),
-            const SizedBox(height: 12),
-            ElevatedButton.icon(
-              onPressed: client.online ? _openScreencast : null,
-              icon: const Icon(Icons.smartphone),
-              label: const Text('Показать экран телефона'),
-            ),
           ],
         ),
       ),
-    ),
     );
   }
+
+  Widget _statusCard() => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(
+                client.online ? Icons.link : Icons.link_off,
+                size: 40,
+                color: client.online ? Colors.green : Colors.red,
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      client.online ? 'Kanal till servern: ansluten' : 'Kanalen är inte ansluten',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    Text(
+                      client.tunnelOnline
+                          ? 'Tunneln är aktiv (${client.tunnelStreams} strömmar)'
+                          : 'Tunneln är inte uppe',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _signStatusCard(String label, Color color) => Card(
+        color: color.withOpacity(0.15),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(child: Text(label, style: TextStyle(fontSize: 16, color: color))),
+              if (client.stage == SignStage.signed || client.stage == SignStage.failed)
+                TextButton(
+                  onPressed: client.clearStatus,
+                  child: const Text('Återställ'),
+                ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _deviceTile(Device device) => Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: ListTile(
+          leading: Icon(
+            device.online ? Icons.phone_android : Icons.phone_android_outlined,
+            color: device.online ? Colors.green : Colors.grey,
+          ),
+          title: Text(device.displayName),
+          subtitle: Text(device.subtitle),
+          trailing: _selectedDeviceId == device.deviceId
+              ? const Icon(Icons.check_circle, color: Colors.green)
+              : TextButton(
+                  onPressed: () => _selectDevice(device),
+                  child: const Text('Välj'),
+                ),
+        ),
+      );
+
+  Widget _selectedDeviceCard(Device device) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Aktiv enhet', style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+              const SizedBox(height: 4),
+              Text(device.displayName, style: const TextStyle(fontSize: 18)),
+              Text(device.subtitle, style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () => _toggleProxy(!_proxyOn),
+                      icon: Icon(_proxyOn ? Icons.stop : Icons.vpn_key),
+                      label: Text(_proxyOn
+                          ? 'All trafik går via ${device.displayName}'
+                          : 'Skicka all trafik via ${device.displayName}'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: _testPublicIp,
+                  child: const Text('Kontrollera publik IP'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }

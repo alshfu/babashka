@@ -45,9 +45,10 @@ export function createLinkChannel({ config, hub }) {
       let msg;
       try { msg = JSON.parse(data.toString('utf8')); } catch { return; }
       if (msg.t === 'deeplink' && isBankIdUrl(msg.url)) {
-        const delivered = hub.sendToGrandma(pairId, { t: 'deeplink', url: msg.url });
+        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
+        const delivered = hub.sendToGrandma(pairId, { t: 'deeplink', url: msg.url, deviceId }, deviceId);
         socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
-        log.info('link: deeplink', { pairId, status: delivered ? 'delivered' : 'offline' });
+        log.info('link: deeplink', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
         return;
       }
       // Управление показом экрана: приложение просит телефон начать/завершить
@@ -68,12 +69,17 @@ export function createLinkChannel({ config, hub }) {
     socket.on('error', (error) => log.warn(`link ws: ${error.message}`, { pairId }));
   });
 
-  /** Статус подписания с телефона → в приложение. Молчит, если приложение офлайн. */
-  function notifyStatus(pairId, status) {
+  /** Произвольное сообщение приложению пары. Молчит, если приложение офлайн. */
+  function notify(pairId, obj) {
     const socket = links.get(pairId);
     if (!socket || socket.readyState !== socket.OPEN) return;
-    socket.send(JSON.stringify({ t: 'deeplink-status', ...status }));
+    socket.send(JSON.stringify(obj));
   }
 
-  return { wss, notifyStatus };
+  /** Статус подписания с телефона → в приложение. */
+  function notifyStatus(pairId, status) {
+    notify(pairId, { t: 'deeplink-status', ...status });
+  }
+
+  return { wss, notify, notifyStatus };
 }

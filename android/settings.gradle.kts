@@ -28,4 +28,3 @@ rootProject.name = "pult"
 // разъедется, и телефоны перестанут подтверждать пару друг другу.
 include(":core")
 include(":grandma")
-include(":helper")

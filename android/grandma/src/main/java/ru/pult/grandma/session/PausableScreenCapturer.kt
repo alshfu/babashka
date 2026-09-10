@@ -54,6 +54,15 @@ class PausableScreenCapturer(
     private var disposed = false
     private var capturing = false
 
+    /**
+     * Внешний слушатель кадров (QR-наблюдение за BankID). Вызывается на потоке хелпера
+     * ПОСЛЕ отдачи кадра в источник; кадр жив только на время вызова — удерживать его
+     * нельзя (нужно дольше — retain()/копия). Читается на каждом кадре: Volatile,
+     * чтобы слушателя можно было сменить без пересоздания захвата.
+     */
+    @Volatile
+    var frameListener: ((org.webrtc.VideoFrame) -> Unit)? = null
+
     /** Системная остановка проекции (бабушка нажала «Стоп» в системной панели). */
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -94,7 +103,11 @@ class PausableScreenCapturer(
         // без VirtualDisplay кадры просто не приходят. Ссылку фиксируем локально,
         // чтобы доставка кадров не читала поле без лока на потоке хелпера.
         val frameObserver = observer
-        helper?.startListening(VideoSink { frame -> frameObserver?.onFrameCaptured(frame) })
+        helper?.startListening(VideoSink { frame ->
+            frameObserver?.onFrameCaptured(frame)
+            runCatching { frameListener?.invoke(frame) }
+                .onFailure { Log.w(TAG, "frameListener: ${it.message}") }
+        })
         Log.i(TAG, "захват запущен: ${width}x$height@$fps")
     }
 

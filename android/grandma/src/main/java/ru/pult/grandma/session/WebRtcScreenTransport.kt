@@ -62,6 +62,7 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
     private var onIce: (String) -> Unit = {}
     private var onControl: (String) -> Unit = {}
     private var onScreenStopped: () -> Unit = {}
+    private var frameListener: ((org.webrtc.VideoFrame) -> Unit)? = null
 
     override val localFingerprint: String
         get() = PairAuth.fingerprintFromSdp(
@@ -78,6 +79,12 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
 
     override fun setScreenStoppedListener(listener: () -> Unit) {
         onScreenStopped = listener
+    }
+
+    /** Внешний слушатель кадров захвата (QR-наблюдение). Переживает пересоздание капчурера. */
+    fun setFrameListener(listener: ((org.webrtc.VideoFrame) -> Unit)?) {
+        frameListener = listener
+        capturer?.frameListener = listener
     }
 
     override suspend fun answer(offerSdp: String, iceServers: List<IceServer>): String {
@@ -135,6 +142,7 @@ class WebRtcScreenTransport(private val context: Context) : ScreenTransport {
             // Бабушка остановила показ системными средствами — это тоже «Стоп».
             onScreenStopped()
         }
+        screenCapturer.frameListener = frameListener
         capturer = screenCapturer
 
         val helper = SurfaceTextureHelper.create("pult-capture", WebRtcCore.eglBase.eglBaseContext)

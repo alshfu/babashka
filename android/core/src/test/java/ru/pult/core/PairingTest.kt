@@ -6,7 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import ru.pult.core.calls.PhoneNumbers
 import ru.pult.core.pairing.InMemoryPairStore
 import ru.pult.core.pairing.PairRecord
 import ru.pult.core.pairing.PairingPacket
@@ -56,48 +55,5 @@ class PairingPacketTest {
 
         store.clear()
         assertNull(store.load())
-    }
-}
-
-class PhoneNumbersTest {
-
-    @Test
-    fun `один номер в разных записях считается одним`() {
-        val forms = listOf("+7 (999) 123-45-67", "89991234567", "79991234567", "9991234567")
-        val normalized = forms.map(PhoneNumbers::normalize).toSet()
-        assertEquals("разные записи одного номера должны совпадать", 1, normalized.size)
-    }
-
-    @Test
-    fun `экстренные номера проходят всегда`() {
-        assertTrue(PhoneNumbers.isEmergency("112"))
-        assertTrue(PhoneNumbers.shouldAllow("112", whitelist = emptyList(), strict = true))
-        assertTrue(PhoneNumbers.shouldAllow("103", whitelist = emptyList(), strict = true))
-    }
-
-    @Test
-    fun `в строгом режиме проходит только белый список`() {
-        val whitelist = listOf("+7 999 123-45-67")
-        assertTrue(PhoneNumbers.shouldAllow("89991234567", whitelist, strict = true))
-        assertFalse(PhoneNumbers.shouldAllow("89990000000", whitelist, strict = true))
-    }
-
-    @Test
-    fun `в мягком режиме чужой номер проходит с меткой`() {
-        assertTrue(PhoneNumbers.shouldAllow("89990000000", emptyList(), strict = false))
-    }
-
-    @Test
-    fun `скрытый номер в строгом режиме не проходит`() {
-        assertTrue(PhoneNumbers.isHidden(null))
-        assertTrue(PhoneNumbers.isHidden(""))
-        assertFalse(PhoneNumbers.shouldAllow(null, listOf("89991234567"), strict = true))
-    }
-
-    @Test
-    fun `нормализация пустых значений`() {
-        assertNull(PhoneNumbers.normalize(null))
-        assertNull(PhoneNumbers.normalize("   "))
-        assertNull(PhoneNumbers.normalize("абв"))
     }
 }

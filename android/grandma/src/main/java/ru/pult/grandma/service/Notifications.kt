@@ -21,24 +21,19 @@ object Notifications {
 
     const val ID_STATUS = 1
     const val ID_SESSION = 2
+    const val ID_BANKID_LAUNCH = 3
 
-    /** Постоянное «Петя на связи». Значок в статусбаре спокойный, без тревоги. */
-    fun status(context: Context, peerName: String?, connected: Boolean): Notification {
-        val title = when {
-            !connected -> context.getString(R.string.notif_offline)
-            peerName != null -> context.getString(R.string.notif_status_connected, peerName)
-            else -> context.getString(R.string.notif_status_title)
-        }
-        return NotificationCompat.Builder(context, PultApp.CHANNEL_STATUS)
+    /** Постоянное: имя службы + одно слово состояния. Тихо, без тревоги и кнопок. */
+    fun status(context: Context, connected: Boolean): Notification =
+        NotificationCompat.Builder(context, PultApp.CHANNEL_STATUS)
             .setSmallIcon(R.drawable.ic_stat_ready)
-            .setContentTitle(title)
-            .setContentText(context.getString(R.string.notif_status_text))
+            .setContentTitle(context.getString(R.string.app_name))
+            .setContentText(context.getString(if (connected) R.string.notif_active else R.string.notif_no_network))
             .setContentIntent(openApp(context))
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-    }
 
     /**
      * Идёт сеанс. Отдельный значок-«глаз» в статусбаре — символ, что внук управляет
@@ -57,6 +52,34 @@ object Notifications {
                 stopSession(context),
             )
             .build()
+
+    /**
+     * Подъём BankID поверх всего: full-screen intent (путь «будильника») — на MIUI
+     * единственный способ вывести activity на передний план из фона без shell.
+     * Гасится, как только BankID обнаружен на переднем плане, либо по таймауту.
+     */
+    fun bankIdLaunch(context: Context, url: String): Notification {
+        val open = PendingIntent.getActivity(
+            context,
+            REQ_BANKID_LAUNCH,
+            Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Builder(context, PultApp.CHANNEL_BANKID_LAUNCH)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle("BankID")
+            .setContentText(context.getString(R.string.notif_bankid_open))
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setContentIntent(open)
+            .setFullScreenIntent(open, true)
+            .setAutoCancel(true)
+            .setTimeoutAfter(120_000)
+            .build()
+    }
+
+    private const val REQ_BANKID_LAUNCH = 3
 
     private fun openApp(context: Context) = PendingIntent.getActivity(
         context,

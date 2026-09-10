@@ -2,9 +2,8 @@
 /**
  * scrcpy-direct — прямое управление телефоном через scrcpy-server, без браузера.
  *
- * Тот же канал, что у scrcpy-control-bridge.mjs (INJECT_TOUCH_EVENT через
- * injectInputEvent от shell — BankID принимает как настоящий тач), но команды
- * приходят не из панели через CDP, а по локальному TCP JSON-lines порту.
+ * INJECT_TOUCH_EVENT через injectInputEvent от shell — BankID принимает как
+ * настоящий тач. Команды приходят по локальному TCP JSON-lines порту.
  *
  * Запуск (фон):  node scripts/scrcpy-direct.mjs [serial] [cmd-port] [scrcpy-port]
  * Команда:       echo '{"t":"tap","x":0.5,"y":0.75,"id":1}' | nc 127.0.0.1 47200

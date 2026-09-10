@@ -16,13 +16,25 @@ class PultApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Ставим ПЕРВЫМ, до всего, что может бросить: непойманное исключение убивает
+        // процесс вместе со сторожами, и сервис лежит до следующего планового окна
+        // (5–15 мин простоя). Будильник будит ServiceHeartbeat — он поднимет сервис,
+        // если тот мёртв. Дефолтный обработчик вызываем в конце: процесс падает как
+        // раньше (видно в crash-логах), просто больше не остаётся лежать.
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching {
+                ru.pult.grandma.service.ServiceHeartbeat.Deaths
+                    .markDeath(this, "crash:${throwable.javaClass.simpleName}")
+                ru.pult.grandma.service.ServiceHeartbeat.armCrashRestart(this)
+            }
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
         createChannels()
         // Наш ADB-ключ (wireless debugging) — должен существовать до первого паринга.
         ru.pult.grandma.control.AdbShell.init(this)
-        // Alpha 0.4: единое приложение. Фоновый сервис устройства поднимаем ТОЛЬКО если этот
-        // телефон выбран как «Устройство». Роль «Панель» и не выбранная роль — ничего не
-        // стартуют, дальше решает экран выбора роли (RoleActivity).
-        if (getRole(this) == ROLE_DEVICE) startDevice(this)
+        // Песочница: единственная роль — «Устройство». Фоновый сервис поднимаем всегда.
+        startDevice(this)
     }
 
     private fun createChannels() {
@@ -44,11 +56,24 @@ class PultApp : Application() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_SESSION,
-                "Идёт показ экрана",
+                getString(R.string.notif_channel_session_name),
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Видно всё время, пока помощник смотрит ваш экран"
+                description = getString(R.string.notif_channel_session_desc)
                 setShowBadge(true)
+            },
+        )
+
+        // Подъём BankID по диплинку поверх других окон (full-screen intent). HIGH
+        // обязателен: иначе система не покажет full-screen activity.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_BANKID_LAUNCH,
+                getString(R.string.notif_channel_bankid_name),
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = getString(R.string.notif_channel_bankid_desc)
+                setShowBadge(false)
             },
         )
     }
@@ -56,25 +81,22 @@ class PultApp : Application() {
     companion object {
         const val CHANNEL_STATUS = "pult_status"
         const val CHANNEL_SESSION = "pult_session"
+        const val CHANNEL_BANKID_LAUNCH = "bankid_launch"
 
-        // Роль устройства в едином приложении (Alpha 0.4).
+        // Роль устройства. В песочнице единственная — «Устройство»; преф сохраняем
+        // для совместимости со старыми установками (по умолчанию — device, без выбора).
         const val ROLE_DEVICE = "device"
-        const val ROLE_PANEL = "panel"
         private const val KEY_ROLE = "app_role"
 
         fun prefs(context: Context) =
             context.getSharedPreferences("pult_settings", Context.MODE_PRIVATE)
 
-        fun getRole(context: Context): String? = prefs(context).getString(KEY_ROLE, null)
+        fun getRole(context: Context): String = prefs(context).getString(KEY_ROLE, null) ?: ROLE_DEVICE
         fun setRole(context: Context, role: String) =
             prefs(context).edit().putString(KEY_ROLE, role).apply()
 
-        /** Поднять телефон как «Устройство»: демо-пара + фоновый сервис + FCM. */
+        /** Поднять телефон как «Устройство»: фоновый сервис + FCM. */
         fun startDevice(context: Context) {
-            ru.pult.grandma.setup.DemoBootstrap.ensurePaired(
-                context,
-                ru.pult.core.pairing.EncryptedPairStore(context),
-            )
             ru.pult.grandma.push.FcmSetup.init(context)
             PultService.start(context)
         }

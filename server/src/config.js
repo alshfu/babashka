@@ -37,8 +37,6 @@ export const config = {
   // Пробуждение спящего телефона бабушки. Пусто → push отключён, работает только онлайн-путь.
   fcmKey: process.env.FCM_KEY ?? '',
 
-  servePanel: flag('SERVE_PANEL', true),
-
   // TLS-листенер (https + wss) для доступа с телефонов: браузеру нужен защищённый
   // контекст (crypto + захват экрана). Телефон-бабушка при этом остаётся на обычном ws.
   tlsPort: num('TLS_PORT', 8443),
@@ -57,6 +55,12 @@ export const config = {
   // Канал «VPS ⇄ агент» (server/src/agent.js): команды панели на телефон через
   // домашний мост (BankID-вход по LAN). Пусто → канал закрыт.
   agentToken: process.env.AGENT_TOKEN ?? '',
+
+  // Канал обновлений (server/src/update.js): хостинг apk/dex и push уведомлений.
+  // UPDATE_TOKEN — отдельный токен для скачивания (манифест + артефакт); по умолчанию
+  // совпадает с AGENT_TOKEN. Загрузка новых версий — всегда по x-agent-token.
+  updatesDir: process.env.UPDATES_DIR ?? './data/updates',
+  updateToken: process.env.UPDATE_TOKEN ?? process.env.AGENT_TOKEN ?? '',
   // Полуоткрытые сокеты над мобильным Wi-Fi надо ловить быстро, иначе сервер считает
   // телефон «в сети», пока тот молчит, и запрос помощи уходит в никуда.
   heartbeatMs: num('HEARTBEAT_MS', 12_000),

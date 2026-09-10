@@ -18,6 +18,7 @@ class BootReceiver : BroadcastReceiver() {
         // Любой из известных интентов загрузки/обновления — поднимаем сервис и сторожей.
         ServiceHeartbeat.Deaths.markAlive(context, "boot:${intent.action}")
         ServiceHeartbeat.schedule(context)
+        BootDiagnostics.run(context)
         // Через мост: прямой старт PultService при загрузке запрещён (mediaProjection в
         // типах), а dataSync-мост легален — он поднимет основной сервис из foreground.
         runCatching {

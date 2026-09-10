@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280" viewBox="0 0 720 1280">
-  <rect width="720" height="1280" fill="#0d0f13"/>
-  <circle cx="360" cy="520" r="120" fill="#1a1f2b"/>
-  <path d="M360 460c-33 0-60 27-60 60s27 60 60 60 60-27 60-60-27-60-60-60zm0 90c-16.5 0-30-13.5-30-30s13.5-30 30-30 30 13.5 30 30-13.5 30-30 30z" fill="#3a4256"/>
-  <text x="360" y="720" text-anchor="middle" fill="#8a94a8" font-family="system-ui,sans-serif" font-size="36" font-weight="500">Screen hidden</text>
-  <text x="360" y="770" text-anchor="middle" fill="#5a6478" font-family="system-ui,sans-serif" font-size="24">Banking app is open</text>
-</svg>

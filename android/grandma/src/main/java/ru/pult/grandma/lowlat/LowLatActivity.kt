@@ -13,7 +13,7 @@ import android.os.Bundle
  * Битрейт/fps и адрес релея можно переопределить экстрами (для узкого канала через VPS):
  * `adb shell am start -n se.pult.app/ru.pult.grandma.lowlat.LowLatActivity \
  *    --ei bitrate 1500000 --ei fps 20 \
- *    --es url 'wss://89-127-235-17.sslip.io/lowlat?room=demo&role=device'`.
+ *    --es url 'wss://85.190.98.57.sslip.io:8445/lowlat?room=demo&role=device'`.
  * Удобная обёртка на время разработки: `node scripts/lowlat-start.mjs`.
  */
 class LowLatActivity : Activity() {

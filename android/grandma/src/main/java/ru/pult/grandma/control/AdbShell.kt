@@ -243,13 +243,53 @@ object AdbShell {
     private fun ensureConnected(): Boolean {
         if (manager.isConnected) return true
         val ctx = appContext ?: return false
+        // Быстрый путь: прямой TLS-коннект на запомненный порт wireless adb.
+        // mDNS-автопоиск на части сетей даёт 60–90 с холодного старта — за это время
+        // autostarttoken BankID протухает и вход срывается.
+        val port = ctx.getSharedPreferences("pult_settings", Context.MODE_PRIVATE)
+            .getInt("adb_wifi_port", 0)
+        if (port > 0) {
+            val ok = runCatching { manager.connectTls(ctx, port.toLong()) }
+                .onFailure { Log.w(TAG, "fast connect :$port failed: ${it.message}") }
+                .getOrDefault(false)
+            if (ok) return true
+        }
         return runCatching { manager.autoConnect(ctx, 10_000) }
             .onFailure { Log.w(TAG, "connect failed: ${it.message}") }
             .getOrDefault(false)
     }
 
-    /** Выполнить shell-команду как shell (UID 2000). ok + stdout. */
+    /**
+     * «Живая сессия управления»: LanAgent (TCP loopback, переживает выключение
+     * wireless debugging) ИЛИ установленная adbd-сессия. Диплинк-путь BankID
+     * смотрит только сюда: подъём adbd-подключения включил бы «Trådlös
+     * felsökning», и BankID отказался бы работать. LanAgent к нему невидим.
+     */
+    fun hasLiveSession(): Boolean =
+        LanShell.available() || hasAdbSession()
+
+    /** Только adbd-сессия (без LanAgent): живая adbd = wireless debugging активна —
+     *  BankID её видит и блокирует. Используется при гашении adb_wifi перед подъёмом. */
+    fun hasAdbSession(): Boolean = runCatching { manager.isConnected }.getOrDefault(false)
+
+    /** Канал к localabstract-сокету устройства через нашу adbd-сессию. Прямой
+     *  LocalSocket к сокетам shell приложению запрещён на HyperOS/Android 15
+     *  (ECONNREFUSED без avc), а прокси через adbd — разрешён. */
+    fun openLocalAbstract(name: String): io.github.muntashirakon.adb.AdbStream? {
+        if (!ensureConnected()) return null
+        return runCatching { manager.openStream("localabstract:$name") }
+            .onFailure { Log.w(TAG, "openLocalAbstract $name: ${it.message}") }
+            .getOrNull()
+    }
+
+    /** Выполнить shell-команду как shell (UID 2000). ok + stdout.
+     *  Сначала LanAgent (TCP loopback, не будит wireless debugging), потом adbd. */
     fun exec(cmd: String, timeoutMs: Long = 15000): Pair<Boolean, String> {
+        if (LanShell.available()) {
+            val res = LanShell.exec(cmd, timeoutMs)
+            if (res.first) return res
+            Log.w(TAG, "lanagent exec failed, fallback adbd: ${res.second.take(80)}")
+        }
         if (!ensureConnected()) return false to "adb not connected (pairing needed?)"
         return runCatching {
             val stream = manager.openStream("shell:$cmd")

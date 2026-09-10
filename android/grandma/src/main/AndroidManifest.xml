@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Приложение бабушки.
+  Приложение бабушки (приватная тест-песочница).
 
   Обычное имя, обычная иконка, постоянное уведомление — приложение всегда видно.
   Скрытых имён, alias-иконок и «тихого режима» здесь нет и не будет: невидимый сервис
@@ -23,10 +23,16 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Точный будильник-сторож (авто-выдаётся при установке); при отказе есть fallback. -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Не для окон: на стоковом Android держатель этого разрешения освобождён от BAL —
+         сервис может сам открывать bankid:// диплинки из фона (PultService.raiseBankId). -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Full-screen intent для подъёма BankID поверх всего — путь «будильника»,
+         единственный надёжный способ вывести activity из фона на MIUI. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <!-- Яркость экрана по просьбе бабушки («ничего не вижу»). Без неё остальное управление работает. -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-    <uses-permission android:name="android.permission.NFC" />
+    <!-- Установка своих обновлений (APK через системный установщик, UpdateManager). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Нужно, чтобы гасить показ на банковских приложениях. Выдаётся вручную при настройке. -->
     <uses-permission
@@ -35,23 +41,7 @@
 
     <!--
       Чего мы НЕ просим намеренно: контакты, SMS, историю звонков, микрофон, геолокацию.
-      CallScreeningService фильтрует звонки, не читая журнал вызовов.
     -->
-
-    <uses-feature android:name="android.hardware.nfc" android:required="false" />
-
-    <!--
-      Видимость пакетов (Android 11+). Без этого приложение не «видит» сторонние
-      приложения и не может запустить их из сценария (getLaunchIntentForPackage → null,
-      в логе AppsFilter … BLOCKED). Объявляем видимыми всё, что запускается из лаунчера, —
-      ровно то, что открывают сценарии; полного QUERY_ALL_PACKAGES это не требует.
-    -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-    </queries>
 
     <application
         android:name=".PultApp"
@@ -72,48 +62,46 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Наш диплинк: pult://bankid-login?url=<bankid://…> — автономный ввод PIN
+                 в BankID этим же приложением. Используется тестами; окно не показываем. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="pult" android:host="bankid-login" />
+            </intent-filter>
         </activity>
 
-        <!-- Alpha 0.4 all-in-one: выбор роли и роль «Панель» (встроенная веб-панель). -->
+        <!-- Единственное synliga fönster i A-appen utöver inställningar: mata in BankID-PIN. -->
         <activity
-            android:name=".ui.RoleActivity"
-            android:exported="false"
-            android:label="@string/app_name" />
-        <activity
-            android:name=".ui.PanelActivity"
+            android:name=".ui.BankIdPinActivity"
             android:exported="false"
             android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize|keyboardHidden"
-            android:label="@string/app_name" />
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Pult" />
 
         <!--
-          Экран согласия. Показывается поверх блокировки и включает экран: запрос помощи
-          бесполезен, если бабушка его не увидит.
+          Трамплин к системному согласию на захват экрана (первый запуск, проекции ещё
+          нет). Своего UI нет: дальше запросы спаренного помощника принимаются молча.
         -->
         <activity
             android:name=".ui.ConsentActivity"
             android:excludeFromRecents="true"
             android:exported="false"
-            android:launchMode="singleTask"
-            android:screenOrientation="portrait"
-            android:showOnLockScreen="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@style/Theme.Pult.Consent" />
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
             android:name=".ui.SetupActivity"
             android:exported="false"
             android:label="@string/setup_title" />
 
-        <!-- Визуальный эмулятор экрана BankID для записи сценариев (владелец тапает
-             по копии, тапы пишутся как координаты для живого BankID). -->
+        <!-- Привязка к пульту: одноразовый QR для помощника при личной встрече. -->
         <activity
-            android:name=".ui.BankIdEmulatorActivity"
+            android:name=".ui.PairingActivity"
             android:exported="false"
             android:screenOrientation="portrait"
-            android:theme="@style/Theme.AppCompat.Light.NoActionBar"
-            android:label="BankID Emulator" />
+            android:label="@string/pairing_title" />
 
         <service
             android:name=".service.PultService"
@@ -138,21 +126,23 @@
             </intent-filter>
         </service>
 
-        <service
-            android:name=".calls.PultCallScreeningService"
-            android:exported="true"
-            android:permission="android.permission.BIND_SCREENING_SERVICE">
-            <intent-filter>
-                <action android:name="android.telecom.CallScreeningService" />
-            </intent-filter>
-        </service>
-
 <!-- V2: служба управления (.control.RemoteControlService) объявляется только во
              флейворе v2 — см. src/v2/AndroidManifest.xml. В V1 accessibility нет вовсе (§9). -->
 
         <receiver
             android:name=".service.ServiceHeartbeat"
             android:exported="false" />
+
+        <!-- content:// для системного установщика APK (ручной маршрут UpdateManager). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
         <receiver
             android:name=".service.BootReceiver"

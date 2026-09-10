@@ -26,7 +26,7 @@ class _ScreencastPageState extends State<ScreencastPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Экран телефона')),
+        appBar: AppBar(title: const Text('Skärmsändning')),
         body: WebViewWidget(controller: controller),
       );
 }

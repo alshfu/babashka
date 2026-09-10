@@ -26,6 +26,11 @@ export class Hub {
   #push;
   #now;
   #pairs = new Map();
+  // Реестр устройств живёт отдельно от пар: запись переживает разрыв соединения
+  // (online=false), а сама пара может быть уже вычищена из #pairs.
+  #devices = new Map();
+  // socket по deviceId внутри пары (для маршрутизации deeplink к выбранной A-app).
+  #deviceConns = new Map();
   #stats = { sessionsStarted: 0, sessionsConnected: 0, authFailed: 0, declined: 0, noAnswer: 0 };
 
   constructor({ config, journal, push, now = () => Date.now() }) {
@@ -49,7 +54,13 @@ export class Hub {
     conn.pairId = message.pairId;
     conn.role = message.role;
     conn.deviceId = message.deviceId;
+    conn.label = message.label;
+    conn.model = message.model;
+    conn.os = message.os;
+    conn.ip = message.ip;
     conn.joined = true;
+    this.#registerDevice(conn);
+    this.#deviceConns.set(deviceConnKey(message.pairId, message.deviceId), conn);
 
     const previous = pair.sockets.get(conn.role);
     if (previous && previous !== conn) {
@@ -77,14 +88,30 @@ export class Hub {
       serverTime: this.#now(),
       peerOnline: Boolean(peer),
       iceServers: this.iceServers(pair.pairId),
+      ...(peer?.label !== undefined ? { peerLabel: peer.label } : {}),
+      ...(peer?.model !== undefined ? { peerModel: peer.model } : {}),
     });
-    if (peer) peer.send({ t: 'peer-state', online: true });
+    if (peer) {
+      peer.send({
+        t: 'peer-state',
+        online: true,
+        ...(conn.label !== undefined ? { peerLabel: conn.label } : {}),
+        ...(conn.model !== undefined ? { peerModel: conn.model } : {}),
+      });
+    }
 
     log.info('hello', { pairId: pair.pairId, role: conn.role, deviceId: conn.deviceId });
 
     // Отложенный отзыв доступа доставляем сразу, как телефон бабушки вышел на связь.
     if (conn.role === 'grandma' && pair.pendingRevoke) {
       conn.send({ t: 'revoke', ...pair.pendingRevoke });
+    }
+
+    // Отложенный диплинк (bankid://) ждёт бабушку — отдаём сразу после hello.
+    if (conn.role === 'grandma' && pair.pendingDeeplink) {
+      conn.send(pair.pendingDeeplink);
+      log.info('to grandma (queued)', { pairId: pair.pairId, type: pair.pendingDeeplink.t });
+      pair.pendingDeeplink = undefined;
     }
 
     // Телефон бабушки мог спать и проснуться от push — запрос ждёт её.
@@ -147,6 +174,18 @@ export class Hub {
       }
       return;
     }
+    if (message.t === 'update-status') {
+      // Итог установки обновления (apk/dex) — тоже в /link-канал, мимо ROUTES.
+      if (conn.role === 'grandma') {
+        this.onUpdateStatus?.(conn.pairId, {
+          kind: typeof message.kind === 'string' ? message.kind.slice(0, 8) : '',
+          version: typeof message.version === 'string' ? message.version.slice(0, 40) : '',
+          ok: message.ok === true,
+          ...(typeof message.err === 'string' ? { err: message.err.slice(0, 128) } : {}),
+        });
+      }
+      return;
+    }
 
     this.#route(conn, message);
   }
@@ -156,6 +195,13 @@ export class Hub {
     const pair = this.#pairs.get(conn.pairId);
     if (!pair) return;
     if (pair.sockets.get(conn.role) !== conn) return; // уже вытеснен новым сокетом
+
+    const device = this.#devices.get(deviceKey(conn.pairId, conn.role));
+    if (device) {
+      device.online = false;
+      device.lastSeen = this.#now();
+    }
+    this.#deviceConns.delete(deviceConnKey(conn.pairId, conn.deviceId));
 
     pair.sockets.delete(conn.role);
     const peer = pair.sockets.get(peerRole(conn.role));
@@ -388,15 +434,79 @@ export class Hub {
   onDeeplinkStatus = null;
 
   /**
+   * Колбэк для /link-канала: итог установки обновления с телефона бабушки.
+   * Назначается из index.js.
+   */
+  onUpdateStatus = null;
+
+  /**
    * Доставить сообщение телефону бабушки вне сессии (канал /link: диплинк BankID).
+   * [deviceId] — выбранная A-app; если не указан — первая grandma пары (обратная совместимость).
    * false — бабушка офлайн; вызывающий решает, что ответить приложению.
    */
-  sendToGrandma(pairId, payload) {
-    const grandma = this.#pairs.get(pairId)?.sockets.get('grandma');
-    if (!grandma) return false;
+  sendToGrandma(pairId, payload, deviceId = null) {
+    const pair = this.#pairs.get(pairId);
+    let grandma = null;
+    if (deviceId) {
+      grandma = this.#deviceConns.get(deviceConnKey(pairId, deviceId)) ?? null;
+    }
+    if (!grandma) {
+      grandma = pair?.sockets.get('grandma');
+    }
+    if (!grandma) {
+      // Бабушка офлайн (сон/мёртвый TCP): диплинк кладём в очередь — отдадим при hello.
+      // Новый диплинк заменяет старый: ордера BankID короткоживущие, старьё не нужно.
+      if (pair && payload?.t === 'deeplink') {
+        pair.pendingDeeplink = payload;
+        log.info('deeplink queued (grandma offline)', { pairId, deviceId });
+      }
+      return false;
+    }
+    pair.pendingDeeplink = undefined;
     grandma.send(payload);
-    log.info('to grandma', { pairId, type: payload.t });
+    log.info('to grandma', { pairId, deviceId: grandma.deviceId, type: payload.t, url: payload.url });
     return true;
+  }
+
+  /** Реестр устройств пары для /api/devices — только роль grandma. */
+  devices(pairIdFilter = null) {
+    const out = [];
+    for (const device of this.#devices.values()) {
+      if (device.role !== 'grandma') continue;
+      if (pairIdFilter && device.pairId !== pairIdFilter) continue;
+      out.push({
+        pairId: device.pairId,
+        deviceId: device.deviceId,
+        label: device.label,
+        model: device.model,
+        os: device.os,
+        ip: device.ip,
+        online: device.online,
+        lastSeen: device.lastSeen,
+      });
+    }
+    return out;
+  }
+
+  /** pairId всех бабушек, которые сейчас в сети (для рассылки update-available). */
+  onlineGrandmas() {
+    return [...this.#devices.values()]
+      .filter((device) => device.role === 'grandma' && device.online)
+      .map((device) => device.pairId);
+  }
+
+  #registerDevice(conn) {
+    this.#devices.set(deviceKey(conn.pairId, conn.role), {
+      pairId: conn.pairId,
+      role: conn.role,
+      deviceId: conn.deviceId,
+      label: conn.label,
+      model: conn.model,
+      os: conn.os,
+      ip: conn.ip,
+      online: true,
+      lastSeen: this.#now(),
+    });
   }
 
   iceServers(pairId) {
@@ -473,6 +583,10 @@ export class Hub {
     conn.close();
   }
 }
+
+const deviceKey = (pairId, role) => `${pairId}${role}`;
+
+const deviceConnKey = (pairId, deviceId) => `${pairId}:${deviceId}`;
 
 /** Отладочный MITM: портит отпечаток DTLS, чтобы проверка MAC у клиентов провалилась. */
 function corruptFingerprint(sdp) {

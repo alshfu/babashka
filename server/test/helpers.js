@@ -9,7 +9,6 @@ export async function startTestServer(overrides = {}) {
     host: '127.0.0.1',
     journalPath: ':memory:',
     logLevel: 'error',
-    servePanel: false,
     ...overrides,
   });
   const port = await app.listen();
@@ -51,8 +50,8 @@ export class TestClient {
     this.#socket.send(payload);
   }
 
-  async hello({ pairId, role, deviceId = `dev-${role}`, journalTokenHash } = {}) {
-    this.send({ t: 'hello', v: 1, pairId, role, deviceId, journalTokenHash });
+  async hello({ pairId, role, deviceId = `dev-${role}`, journalTokenHash, label, model } = {}) {
+    this.send({ t: 'hello', v: 1, pairId, role, deviceId, journalTokenHash, label, model });
     return this.next('hello-ok');
   }
 

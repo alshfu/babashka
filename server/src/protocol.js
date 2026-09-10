@@ -103,6 +103,19 @@ export function validateHello(message) {
   if (message.journalTokenHash !== undefined && !isNonEmptyString(message.journalTokenHash, 128)) {
     return { ok: false, code: ERROR.BAD_MESSAGE };
   }
+  // Идентификация устройства для реестра (/api/devices): необязательные «визитки».
+  if (message.label !== undefined && !isNonEmptyString(message.label, 40)) {
+    return { ok: false, code: ERROR.BAD_MESSAGE };
+  }
+  if (message.model !== undefined && (typeof message.model !== 'string' || message.model.length > 60)) {
+    return { ok: false, code: ERROR.BAD_MESSAGE };
+  }
+  if (message.os !== undefined && (typeof message.os !== 'string' || message.os.length > 40)) {
+    return { ok: false, code: ERROR.BAD_MESSAGE };
+  }
+  if (message.ip !== undefined && (typeof message.ip !== 'string' || message.ip.length > 45)) {
+    return { ok: false, code: ERROR.BAD_MESSAGE };
+  }
   return { ok: true };
 }
 

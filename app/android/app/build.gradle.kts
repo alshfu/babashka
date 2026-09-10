@@ -43,6 +43,13 @@ kotlin {
     }
 }
 
+dependencies {
+    // Нативный держатель /link-канала: OkHttp WebSocket живёт в сервисе,
+    // а не во Flutter-движке — движок умирает вместе с activity (NO_HISTORY
+    // у интента Swedbank), а диплинк должен уйти на сервер в любом случае.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}
+
 flutter {
     source = "../.."
 }

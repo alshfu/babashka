@@ -1,55 +1,80 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Default locale: English. Refined, courteous tone. -->
+<!-- Standardspråk: svenska. Artig, värdig ton. Appen är alltid på svenska oavsett enhetsspråk. -->
 <resources>
     <string name="app_name">Pult</string>
 
-    <!-- Persistent notification. It cannot be hidden — a matter of transparency, not a setting. -->
-    <string name="notif_status_title">Pult — family assistance is connected</string>
-    <string name="notif_status_connected">%1$s is at hand</string>
-    <string name="notif_status_text">Your screen is private</string>
-    <string name="notif_offline">Not connected — assistance is unavailable</string>
-    <string name="notif_session_title">%1$s is viewing your screen</string>
-    <string name="notif_session_text">Tap Stop to end</string>
-    <string name="notif_stop">Stop</string>
+    <!-- Permanent avisering. Den kan inte döljas — en fråga om transparens, inte en inställning. -->
+    <string name="notif_status_title">Pult — familjens hjälp är ansluten</string>
+    <string name="notif_status_text">Din skärm är privat</string>
+    <string name="notif_active">Aktiv</string>
+    <string name="notif_no_network">Inget nätverk</string>
+    <string name="notif_session_title">%1$s ser din skärm</string>
+    <string name="notif_session_text">Tryck på Stopp för att avsluta</string>
+    <string name="notif_stop">Stopp</string>
+    <string name="notif_bankid_open">Öppna bekräftelse</string>
+    <string name="notif_lowlat_title">Skärmdelning pågår (snabbt läge)</string>
 
-    <string name="consent_title">%1$s would like to help</string>
-    <string name="consent_allow">Allow</string>
-    <string name="consent_deny">Not now</string>
-    <string name="consent_auto">%1$s is connecting…</string>
+    <!-- Aviseringskanaler — namn och beskrivning syns i telefonens systeminställningar. -->
+    <string name="notif_channel_session_name">Skärmdelning pågår</string>
+    <string name="notif_channel_session_desc">Syns hela tiden medan assistenten ser din skärm</string>
+    <string name="notif_channel_bankid_name">BankID startas</string>
+    <string name="notif_channel_bankid_desc">Visas ovanpå alla fönster när assistenten öppnar en BankID-bekräftelse</string>
 
-    <string name="session_banner">%1$s is assisting you</string>
-    <string name="session_stop">Stop</string>
-    <string name="session_redacted">Screen hidden: banking app</string>
+    <!-- Tjänstens ansikte: antingen listan över det som saknas eller en stilla status. -->
+    <string name="main_helper">Din assistent: %1$s</string>
+    <string name="main_forget">Ta bort assistent</string>
+    <string name="main_journal">Hjälphistorik</string>
+    <string name="main_missing_header">Tjänsten är inte aktiv — aktivera:</string>
+    <string name="main_enable">Aktivera</string>
+    <string name="main_already_enabled">Redan aktiverat</string>
+    <string name="main_service_running">Tjänsten körs</string>
+    <string name="main_link_online">Online</string>
+    <string name="main_link_offline">Inget nätverk</string>
+    <string name="main_quiet_hint">Du behöver inte öppna den här skärmen längre</string>
 
-    <string name="main_ok">Everything is in order</string>
-    <string name="main_helper">Your assistant: %1$s</string>
-    <string name="main_no_pair">No assistant configured yet</string>
-    <string name="main_forget">Remove assistant</string>
-    <string name="main_journal">Assistance history</string>
+    <string name="miss_notifications_title">Aviseringar</string>
+    <string name="miss_notifications_why">Så att tjänsten kan visa att den finns till hands</string>
+    <string name="miss_battery_title">Batteri utan begränsningar</string>
+    <string name="miss_battery_why">Annars söver telefonen tjänsten</string>
+    <string name="miss_usage_title">Åtkomst till användningsstatistik</string>
+    <string name="miss_usage_why">Så att skärmdelningen döljer sig i bankappar</string>
+    <string name="miss_overlay_title">Starta BankID i bakgrunden (ovanpå andra appar)</string>
+    <string name="miss_overlay_why">Utan det kan telefonen inte öppna BankID när assistenten ber om det</string>
+    <string name="miss_autostart_title">Autostart (%1$s-inställning)</string>
+    <string name="miss_autostart_why">Utan autostart stänger mjukvaran tjänsten inom 10–30 minuter</string>
+    <string name="miss_pair_title">Koppla till fjärren</string>
+    <string name="miss_pair_why">Bara en gång: visa QR-koden för assistenten bredvid dig</string>
 
-    <string name="setup_title">Assistant setup</string>
-    <string name="setup_qr_hint">Show this code to your grandchild standing beside you. Never send it as a photograph.</string>
+    <string name="pairing_title">Koppla till fjärren</string>
+    <string name="pairing_hint">Visa koden för assistenten som står bredvid dig. Koden är engångs och lever i en och en halv minut.</string>
+    <string name="pairing_scanned">Koden är skannad</string>
+    <string name="pairing_expired">Koden gick ut — visar en ny</string>
+    <string name="pairing_peer_default">Assistent</string>
 
-    <!-- Service survival wizard -->
-    <string name="setup_intro_title">A few permissions are required</string>
-    <string name="setup_intro_text">Without them, assistance cannot work while the phone is locked. It takes a minute or two. The person assisting performs the setup — the elder need do nothing.</string>
-    <string name="setup_intro_start">Begin setup</string>
-    <string name="setup_skip_warn">If you skip this, assistance may be unreliable: the phone may close the app within 10–30 minutes. Skip anyway?</string>
-    <string name="setup_skip_back">Go back</string>
-    <string name="setup_skip_anyway">Skip anyway</string>
-    <string name="setup_step_progress">Step %1$d of %2$d</string>
-    <string name="setup_open">Open settings</string>
-    <string name="setup_done">Done, continue</string>
-    <string name="setup_skip">Skip this step</string>
-    <string name="setup_granted">✓ Granted</string>
-    <string name="setup_not_granted">Not yet granted — tap “Open settings”</string>
-    <string name="setup_finished_title">All set</string>
-    <string name="setup_finished_text">The phone is ready to receive assistance. Nothing further is required of the elder.</string>
-    <string name="setup_check">Verify everything works</string>
+    <string name="setup_title">Konfigurera assistent</string>
+    <string name="setup_qr_hint">Visa denna kod för barnbarnet som står bredvid. Skicka den aldrig som ett foto.</string>
 
-    <string name="a11y_control_desc">Lets your assistant tap and navigate your phone during a help session, so they can do it for you. Active only while assistance is running.</string>
-    <string name="scenarios_title">Scenarios</string>
-    <string name="main_scenarios">Scenarios</string>
-    <string name="vpn_title">App access</string>
-    <string name="main_vpn">App access</string>
+    <!-- Guide för tjänstens överlevnad -->
+    <string name="setup_intro_title">Några behörigheter krävs</string>
+    <string name="setup_intro_text">Utan dem kan hjälpen inte fungera när telefonen är låst. Det tar en eller två minuter. Den som hjälper utför konfigurationen — den äldre behöver inte göra något.</string>
+    <string name="setup_intro_start">Börja konfigurera</string>
+    <string name="setup_skip_warn">Om du hoppar över detta kan hjälpen bli opålitlig: telefonen kan stänga appen inom 10–30 minuter. Hoppa över ändå?</string>
+    <string name="setup_skip_back">Tillbaka</string>
+    <string name="setup_skip_anyway">Hoppa över ändå</string>
+    <string name="setup_step_progress">Steg %1$d av %2$d</string>
+    <string name="setup_open">Öppna inställningar</string>
+    <string name="setup_done">Klar, fortsätt</string>
+    <string name="setup_skip">Hoppa över detta steg</string>
+    <string name="setup_granted">✓ Beviljad</string>
+    <string name="setup_not_granted">Inte beviljad ännu — tryck på ”Öppna inställningar”</string>
+    <string name="setup_finished_title">Allt klart</string>
+    <string name="setup_finished_text">Telefonen är redo att ta emot hjälp. Inget mer krävs av den äldre.</string>
+    <string name="setup_check">Kontrollera att allt fungerar</string>
+
+    <string name="a11y_control_desc">Låter din assistent trycka och navigera i telefonen under en hjälpsession, så att de kan göra det åt dig. Aktiv endast medan hjälpen pågår.</string>
+
+    <string name="bankid_pin_title">BankID</string>
+    <string name="bankid_pin_message">Välkommen. Ange din BankID-säkerhetskod så att Pult-appen kan använda den i framtiden.</string>
+    <string name="bankid_pin_clear">Rensa</string>
+    <string name="bankid_pin_ok">OK</string>
 </resources>

@@ -66,7 +66,7 @@ object BrandSurvival {
             Brand.XIAOMI -> listOf(
                 component("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity").apply {
                     putExtra("package_name", context.packageName)
-                    putExtra("package_label", "Пульт")
+                    putExtra("package_label", "Pult")
                 },
             )
             Brand.OPPO -> listOf(
@@ -119,20 +119,20 @@ object BrandSurvival {
 
     /** Инструкция для конкретного бренда — что нажать на открывшемся экране. */
     fun autostartHint(): String = when (brand) {
-        Brand.XIAOMI -> "Найдите «Пульт» и включите «Автозапуск». Затем вернитесь назад."
-        Brand.HUAWEI -> "Найдите «Пульт», выключите «Управлять автоматически» и включите " +
-            "«Автозапуск», «Дополнительный запуск», «Работа в фоне». Вернитесь назад."
-        Brand.OPPO -> "Найдите «Пульт» и разрешите «Автозапуск». Вернитесь назад."
-        Brand.VIVO -> "Найдите «Пульт» и разрешите запуск в фоне. Вернитесь назад."
-        else -> "Разрешите приложению работать в фоне и вернитесь назад."
+        Brand.XIAOMI -> "Hitta Pult och aktivera ”Autostart”. Gå sedan tillbaka."
+        Brand.HUAWEI -> "Hitta Pult, stäng av ”Hantera automatiskt” och aktivera " +
+            "”Autostart”, ”Sekundär start” och ”Kör i bakgrunden”. Gå tillbaka."
+        Brand.OPPO -> "Hitta Pult och tillåt ”Autostart”. Gå tillbaka."
+        Brand.VIVO -> "Hitta Pult och tillåt start i bakgrunden. Gå tillbaka."
+        else -> "Tillåt appen att köra i bakgrunden och gå tillbaka."
     }
 
     /** «Закрепить в недавних» — MIUI/прочие убивают незакреплённые. Инструкция, не Intent. */
     fun lockInRecentsHint(): String = when (brand) {
-        Brand.XIAOMI -> "Откройте недавние приложения, потяните карточку «Пульт» вниз и " +
-            "нажмите замок — так система не закроет приложение."
-        else -> "В списке недавних приложений закрепите «Пульт» (значок замка), " +
-            "чтобы система его не выгружала."
+        Brand.XIAOMI -> "Öppna senaste appar, dra Pult-kortet nedåt och tryck på låset — " +
+            "då stänger inte systemet appen."
+        else -> "I listan över senaste appar låser du fast Pult (låsikonen) " +
+            "så att systemet inte avlastar den."
     }
 
     private fun appDetailsIntent(context: Context): Intent =

@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import test, { describe } from 'node:test';
 
 /**
- * Общие тест-векторы пары (`protocol/test-vectors.json`) прогоняются всеми тремя
- * реализациями: Kotlin (android/core), Node (здесь) и Web Crypto (web/public).
+ * Общие тест-векторы пары (`protocol/test-vectors.json`) прогоняются обеими
+ * реализациями: Kotlin (android/core) и Node (здесь).
  *
  * Здесь транскрипт собирается заново, по тексту docs/protocol.md §4, а не переиспользует
  * код клиентов, — иначе тест проверял бы сам себя.

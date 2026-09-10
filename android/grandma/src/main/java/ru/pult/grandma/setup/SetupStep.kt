@@ -25,9 +25,9 @@ sealed class SetupStep(
 
     object Battery : SetupStep(
         id = "battery",
-        title = "Работа без ограничений батареи",
-        explain = "Чтобы помощь была доступна в любой момент, телефон не должен «усыплять» приложение.",
-        hint = "Нажмите «Разрешить» в появившемся окне.",
+        title = "Batteri utan begränsningar",
+        explain = "För att hjälpen ska vara tillgänglig när som helst får telefonen inte sätta appen i viloläge.",
+        hint = "Tryck på ”Tillåt” i fönstret som visas.",
     ) {
         override fun intent(context: Context) =
             BrandSurvival.firstResolvable(context, BrandSurvival.batteryIntents(context))
@@ -36,9 +36,9 @@ sealed class SetupStep(
 
     object Overlay : SetupStep(
         id = "overlay",
-        title = "Показ рамки поверх экрана",
-        explain = "Во время сеанса на экране бабушки видна зелёная рамка и кнопка «Стоп».",
-        hint = "Включите «Поверх других приложений» для «Пульта» и вернитесь назад.",
+        title = "Starta BankID i bakgrunden",
+        explain = "Behörigheten ”visa ovanpå andra appar” låter appen själv öppna skärmar från bakgrunden — utan den kan telefonen inte starta BankID när assistenten ber om det.",
+        hint = "Aktivera ”Visa ovanpå andra appar” för Pult och gå tillbaka.",
     ) {
         override fun intent(context: Context) = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -49,9 +49,9 @@ sealed class SetupStep(
 
     object Notifications : SetupStep(
         id = "notifications",
-        title = "Постоянное уведомление",
-        explain = "Уведомление «на связи» показывает, что приложение работает. Скрыть его нельзя.",
-        hint = "Разрешите уведомления для «Пульта» и вернитесь назад.",
+        title = "Permanent avisering",
+        explain = "Aviseringen visar att appen är igång och finns till hands. Den kan inte döljas.",
+        hint = "Tillåt aviseringar för Pult och gå tillbaka.",
     ) {
         override fun intent(context: Context) = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
@@ -62,9 +62,9 @@ sealed class SetupStep(
 
     object UsageAccess : SetupStep(
         id = "usage",
-        title = "Защита банковских приложений",
-        explain = "Когда бабушка откроет банк, показ автоматически гаснет для помощника.",
-        hint = "Включите доступ к статистике для «Пульта» и вернитесь назад.",
+        title = "Skydd för bankappar",
+        explain = "När bankappen öppnas pausas skärmdelningen automatiskt för assistenten.",
+        hint = "Aktivera åtkomst till användningsstatistik för Pult och gå tillbaka.",
     ) {
         override fun intent(context: Context) = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
         override fun granted(context: Context): Boolean {
@@ -81,9 +81,9 @@ sealed class SetupStep(
     /** Автозапуск: проверить нельзя, подтверждает человек. Показываем бренд-инструкцию. */
     object Autostart : SetupStep(
         id = "autostart",
-        title = "Автозапуск (${BrandSurvival.brandName})",
-        explain = "Без автозапуска ${BrandSurvival.brandName} закрывает приложение через 10–30 минут " +
-            "и помощь становится недоступна.",
+        title = "Autostart (${BrandSurvival.brandName})",
+        explain = "Utan autostart stänger ${BrandSurvival.brandName} appen inom 10–30 minuter " +
+            "och hjälpen blir otillgänglig.",
         hint = BrandSurvival.autostartHint(),
     ) {
         override fun intent(context: Context) =
@@ -93,8 +93,8 @@ sealed class SetupStep(
     /** Закрепление в недавних: только инструкция, системного экрана нет. */
     object LockRecents : SetupStep(
         id = "lock-recents",
-        title = "Закрепить в недавних",
-        explain = "Чтобы система не выгружала приложение из памяти.",
+        title = "Lås fast i senaste appar",
+        explain = "Så att systemet inte avlastar appen ur minnet.",
         hint = BrandSurvival.lockInRecentsHint(),
     ) {
         override fun intent(context: Context): Intent? = null

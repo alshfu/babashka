@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bankid_background">#0A2873</color>
+    <color name="bankid_text">#FFFFFF</color>
+    <color name="bankid_key_background">#FFFFFF</color>
+    <color name="bankid_key_text">#0A2873</color>
+</resources>

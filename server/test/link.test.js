@@ -80,3 +80,33 @@ test('/link: deeplink-status от роли helper игнорируется', asy
   helper.send({ t: 'deeplink-status', ok: true, stage: 'signed', err: '' });
   assert.deepEqual(await app.silentFor(150), []);
 });
+
+test('/link: update-status с телефона доезжает до приложения с pairId и at', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('f');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  grandma.send({ t: 'update-status', kind: 'apk', version: '1.2.3', ok: false, err: 'install failed' });
+
+  const status = await app.next('update-status');
+  assert.equal(status.pairId, pair);
+  assert.deepEqual(
+    { kind: status.kind, version: status.version, ok: status.ok, err: status.err },
+    { kind: 'apk', version: '1.2.3', ok: false, err: 'install failed' },
+  );
+  assert.equal(typeof status.at, 'number');
+});
+
+test('/link: update-status от роли helper игнорируется', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('g');
+  const helper = await TestClient.connect(url);
+  await helper.hello({ pairId: pair, role: 'helper' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  helper.send({ t: 'update-status', kind: 'apk', version: '1.2.3', ok: true });
+  assert.deepEqual(await app.silentFor(150), []);
+});

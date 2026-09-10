@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Пара для отладки: один секрет — на телефон (через adb) и в веб-панель (через ссылку).
+ * Пара для отладки: один секрет — на телефон (через adb) и в приложение внука (пакетом).
  *
  * Это инструмент разработчика, а не путь спаривания в продукте. На устройстве пользователя
  * пара создаётся ТОЛЬКО вблизи — NFC или QR при личной встрече (docs/pairing.md).
@@ -26,13 +26,12 @@ const packet = Buffer.from(
   JSON.stringify({ v: 1, pid: pairId, sec: secret, name, url: panelUrl }),
 ).toString('base64url');
 
-const origin = panelUrl.replace(/^ws/, 'http').replace(/\/ws$/, '');
-
 console.log(`pairId:  ${pairId}`);
 console.log(`packet:  ${packet}`);
 console.log();
-console.log('Панель внука (браузер на хосте):');
-console.log(`  ${origin}/panel/?role=helper#p=${packet}`);
+console.log('Внук: UI помощника — Flutter-приложение (app/), веб-панель удалена.');
+console.log('Пакет спаривания для ввода в приложение внука:');
+console.log(`  ${packet}`);
 console.log();
 console.log('Телефон бабушки (эмулятор видит хост как 10.0.2.2, адрес берётся из BuildConfig):');
 console.log(

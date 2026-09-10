@@ -5,16 +5,12 @@ import { fileURLToPath } from 'node:url';
 
 import { log } from './log.js';
 
-const PANEL_ROOT = resolve(fileURLToPath(new URL('../../web/public', import.meta.url)));
+const STATIC_ROOT = resolve(fileURLToPath(new URL('../static', import.meta.url)));
+const APK_RE = /^[\w.-]+\.apk$/;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
 };
 
 const json = (res, status, body) => {
@@ -27,7 +23,7 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
-export function createRequestHandler({ config, hub, journal, startedAt, agentChannel = null }) {
+export function createRequestHandler({ config, hub, journal, startedAt, agentChannel = null, updateChannel = null }) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -48,6 +44,10 @@ export function createRequestHandler({ config, hub, journal, startedAt, agentCha
         return json(res, 200, { iceServers: hub.iceServers(pairId) });
       }
 
+      if (path === '/api/devices' && req.method === 'GET') {
+        return devicesEndpoint(req, res, config, hub);
+      }
+
       if (path === '/api/agent-command' && req.method === 'POST') {
         return await agentCommandEndpoint(req, res, config, agentChannel);
       }
@@ -56,15 +56,21 @@ export function createRequestHandler({ config, hub, journal, startedAt, agentCha
         return journalEndpoint(req, res, url, journal);
       }
 
-      if (config.servePanel && (path === '/' || path.startsWith('/panel'))) {
-        // Демо-стенд: голый адрес (без query) — сразу в панель помощника,
-        // чтобы ссылка работала даже обрезанной мессенджером/браузером.
-        // Ссылки с параметрами (role, demo, pairing-пакет) идут как шли.
-        if ((path === '/' || path === '/panel' || path === '/panel/') && !url.search) {
-          res.writeHead(302, { location: '/panel/?role=helper&demo=1' });
-          return res.end();
-        }
-        return await servePanel(res, path);
+      if (updateChannel && await updateChannel.handle(req, res, url)) {
+        return undefined;
+      }
+
+      if (path === '/') {
+        const body = 'nordic-gateway ok\n';
+        res.writeHead(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-length': Buffer.byteLength(body),
+        });
+        return res.end(body);
+      }
+
+      if (path.startsWith('/panel')) {
+        return await serveViewer(res, path);
       }
 
       return json(res, 404, { error: 'не найдено' });
@@ -120,6 +126,19 @@ function readJsonBody(req, limit = 64 * 1024) {
 }
 
 /**
+ * Реестр телефонов бабушек (server/src/hub.js #devices): кто онлайн, как подписан,
+ * когда видели в последний раз. Доступ — по x-agent-token, как у /api/agent-command.
+ */
+function devicesEndpoint(req, res, config, hub) {
+  const token = req.headers['x-agent-token'];
+  if (!config.agentToken || token !== config.agentToken) {
+    return json(res, 401, { error: 'нет доступа к реестру устройств' });
+  }
+  const url = new URL(req.url, 'http://localhost');
+  return json(res, 200, hub.devices(url.searchParams.get('pairId') || null));
+}
+
+/**
  * Журнал пары. Доступ — по journalToken, который выводится из секрета пары:
  * сервер хранит только его хеш и сам такой токен предъявить не может (docs/protocol.md §7).
  */
@@ -170,13 +189,19 @@ function metrics(res, hub, journal) {
   res.end(lines);
 }
 
-async function servePanel(res, path) {
-  const relative = path === '/' || path === '/panel' || path === '/panel/'
-    ? 'index.html'
-    : normalize(path.replace(/^\/panel\/?/, '')).replace(/^(\.\.[/\\])+/, '');
+/**
+ * Статика /panel: низколатентный просмотрщик, который Flutter-приложение грузит
+ * по адресу /panel/lowlat.html (app/lib/main.dart), и раздача APK
+ * (/panel/a-app.apk, /panel/b-app.apk). Только плоские имена файлов.
+ */
+async function serveViewer(res, path) {
+  const relative = normalize(path.replace(/^\/panel\/?/, '')).replace(/^(\.\.[/\\])+/, '');
+  if (relative !== 'lowlat.html' && relative !== 'lowlat.js' && !APK_RE.test(relative)) {
+    return json(res, 404, { error: 'не найдено' });
+  }
 
-  const file = join(PANEL_ROOT, relative);
-  if (!file.startsWith(PANEL_ROOT)) {
+  const file = join(STATIC_ROOT, relative);
+  if (!file.startsWith(STATIC_ROOT)) {
     return json(res, 403, { error: 'запрещено' });
   }
   try {
@@ -189,6 +214,6 @@ async function servePanel(res, path) {
     });
     createReadStream(file).pipe(res);
   } catch {
-    json(res, 404, { error: 'панель не найдена' });
+    json(res, 404, { error: 'не найдено' });
   }
 }

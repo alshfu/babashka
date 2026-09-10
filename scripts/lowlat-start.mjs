@@ -10,7 +10,7 @@
  * Запуск:  node scripts/lowlat-start.mjs [serial] [bitrate] [fps] [ws-url]
  * напр.:   node scripts/lowlat-start.mjs DQ6TC64DY9PRBE4T 1500000 20
  * Дефолты: serial=DQ6TC64DY9PRBE4T, bitrate=1500000 (VPS-канал), fps=20,
- *          url=wss://89-127-235-17.sslip.io/lowlat?room=demo&role=device
+ *          url=wss://85.190.98.57.sslip.io:8445/lowlat?room=demo&role=device
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -22,7 +22,7 @@ const run = promisify(execFile);
 const SERIAL = process.argv[2] || 'DQ6TC64DY9PRBE4T';
 const BITRATE = process.argv[3] || '1500000';
 const FPS = process.argv[4] || '20';
-const WS_URL = process.argv[5] || 'wss://89-127-235-17.sslip.io/lowlat?room=demo&role=device';
+const WS_URL = process.argv[5] || 'wss://85.190.98.57.sslip.io:8445/lowlat?room=demo&role=device';
 const ACTIVITY = 'se.pult.app/ru.pult.grandma.lowlat.LowLatActivity';
 
 const LOG_DIR = '/Users/al_sh/IdeaProjects/babashka/test_logs';

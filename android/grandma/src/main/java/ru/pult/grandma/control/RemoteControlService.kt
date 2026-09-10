@@ -16,23 +16,68 @@ import ru.pult.grandma.BuildConfig
  * Единственный способ на Android «нажать за пользователя» без системных привилегий —
  * служба доступности: `dispatchGesture` рисует тап/свайп, `performGlobalAction` даёт
  * Назад/Домой/Недавние. Служба включается при настройке (для демо — через adb) и
- * работает ТОЛЬКО пока идёт показ: команды приходят по тому же зашифрованному
- * data-каналу, что и указатель, — сервер их не видит.
+ * работает ТОЛЬКО пока идёт показ: команды приходят по зашифрованному
+ * data-каналу — сервер их не видит.
  *
  * Экземпляр держим статически: сервис Pult дёргает его из обработчика управляющих
  * сообщений. Пока служба не включена, `instance == null` и управление просто недоступно
- * (показ и указатель при этом работают как раньше).
+ * (показ при этом работает как раньше).
  */
 class RemoteControlService : AccessibilityService() {
+
+    /**
+     * Операционный канал «shell → жест» без сессии: `am broadcast` из adb (uid 2000)
+     * шлёт тап/свайп напрямую в dispatchGesture. Нужен для автономных сценариев
+     * (BankID-вход 24/7), где сессионный data-канал недоступен, а инъекция `input`
+     * на защищённых окнах (lockscreen, FLAG_SECURE) режется MIUI.
+     *
+     * Безопасность: ресивер требует у отправителя WRITE_SECURE_SETTINGS (держат
+     * shell/система) — посторонние приложения его не получают.
+     */
+    private val shellTapReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action != ACTION_SHELL_TAP) return
+            val w = resources.displayMetrics.widthPixels.toFloat()
+            val h = resources.displayMetrics.heightPixels.toFloat()
+            when (intent.getStringExtra("cmd")) {
+                "tap" -> {
+                    val fx = intent.getFloatExtra("fx", -1f)
+                    val fy = intent.getFloatExtra("fy", -1f)
+                    if (fx in 0f..1f && fy in 0f..1f) tap(fx * w, fy * h)
+                }
+                "swipe" -> {
+                    val fx1 = intent.getFloatExtra("fx1", -1f); val fy1 = intent.getFloatExtra("fy1", -1f)
+                    val fx2 = intent.getFloatExtra("fx2", -1f); val fy2 = intent.getFloatExtra("fy2", -1f)
+                    val ms = intent.getLongExtra("ms", 250L)
+                    if (fx1 in 0f..1f && fy1 in 0f..1f && fx2 in 0f..1f && fy2 in 0f..1f) {
+                        swipe(fx1 * w, fy1 * h, fx2 * w, fy2 * h, ms)
+                    }
+                }
+                "back" -> nav("back")
+                "home" -> nav("home")
+            }
+        }
+    }
 
     override fun onServiceConnected() {
         instance = this
         android.util.Log.i("PultControl", "onServiceConnected: instance set")
-        // Размеры экрана нужны записи для перевода границ элемента в доли экрана.
-        recorder.screenSize = displaySize()
-        // §177 ТЗ: область службы ограничена — по умолчанию видим только приложения,
-        // для которых семья записала сценарии. На всё остальное служба «слепа».
-        applyScope(openForRecording = false)
+        applyScope()
+        runCatching {
+            registerReceiver(
+                shellTapReceiver,
+                android.content.IntentFilter(ACTION_SHELL_TAP),
+                android.Manifest.permission.WRITE_SECURE_SETTINGS,
+                null,
+                android.content.Context.RECEIVER_EXPORTED,
+            )
+            android.util.Log.i("PultControl", "shell tap receiver registered")
+        }.onFailure {
+            android.util.Log.w("PultControl", "shell tap receiver: ${it.message}")
+        }
+        // Служба доступности — один из самых защищённых компонентов: система сама её
+        // перезапускает. Пока она жива, держим на ней вахту над основным сервисом.
+        guardMainService()
     }
 
     /**
@@ -41,12 +86,10 @@ class RemoteControlService : AccessibilityService() {
      * приложение не в списке — и тап «стреляет мимо» на рабочем столе и в настройках.
      *
      * Поэтому область НЕ ограничиваем: помощник управляет телефоном целиком во время
-     * согласованной, видимой (рамка + уведомление) сессии. Приватность обеспечивается
-     * согласием, видимостью и журналом, а НЕ невидимостью части приложений для службы.
-     * Ограничение по `packageNames` (§177) относится к отдельному сценарному режиму «помощь
-     * в выбранных приложениях» и будет решаться там, где оно не ломает общее управление.
+     * согласованной, видимой (уведомление) сессии. Приватность обеспечивается
+     * видимостью и журналом, а НЕ невидимостью части приложений для службы.
      */
-    fun applyScope(openForRecording: Boolean) {
+    fun applyScope() {
         val info = serviceInfo ?: return
         info.packageNames = null // без ограничений — иначе жесты не проходят вне списка
         runCatching { serviceInfo = info }
@@ -58,25 +101,16 @@ class RemoteControlService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        runCatching { unregisterReceiver(shellTapReceiver) }
         if (instance === this) instance = null
         super.onDestroy()
     }
 
-    /**
-     * Запись сценариев: работает только когда её явно включили из приложения.
-     * Объект общий на процесс — служба пересоздаётся при уходе приложения в фон,
-     * а запись обязана это пережить (иначе сценарий обрывается на первом же шаге).
-     */
-    val recorder: ScenarioRecorder get() = ScenarioRecorder.shared
-
-    val player by lazy {
-        ScenarioPlayer(this, screenWidth = { displaySize().first }, screenHeight = { displaySize().second })
-    }
-
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Вне записи события просто выбрасываются: ничего не копим и никуда не шлём.
-        if (event != null && recorder.isRecording) recorder.onEvent(event)
-
+        // Каждое событие доступности — повод сверить, жив ли основной сервис
+        // (троттлинг внутри guardMainService): события идут почти непрерывно,
+        // пока телефоном пользуются, и вахта на них не спит.
+        guardMainService()
         // Отладочный автоклик системного диалога захвата экрана.
         // На Android 15+ appops PROJECT_MEDIA allow не всегда подавляет системное окно
         // (особенно на первом запуске), поэтому на этапе разработки кликаем за бабушку.
@@ -107,6 +141,24 @@ class RemoteControlService : AccessibilityService() {
     }
 
     override fun onInterrupt() = Unit
+
+    private var lastGuardAt = 0L
+
+    /**
+     * Вахта выживания основного сервиса на самом защищённом компоненте приложения.
+     * Система перезапускает accessibility-службу почти всегда — значит, пока вахта жива,
+     * PultService не должен быть мёртв. Троттлинг 30 с: события доступности идут почти
+     * непрерывно, а проверка через ActivityManager не бесплатная.
+     */
+    private fun guardMainService() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastGuardAt < GUARD_INTERVAL_MS) return
+        lastGuardAt = now
+        if (!ru.pult.grandma.service.PultService.isRunning(this)) {
+            android.util.Log.w("PultControl", "guard: PultService мёртв — поднимаем")
+            ru.pult.grandma.service.PultService.start(this)
+        }
+    }
 
     private fun displaySize(): Pair<Int, Int> {
         val metrics = resources.displayMetrics
@@ -277,6 +329,12 @@ class RemoteControlService : AccessibilityService() {
     companion object {
         private const val TAP_MS = 100L
 
+        /** Экшн broadcast-канала «shell → жест» (см. shellTapReceiver). */
+        const val ACTION_SHELL_TAP = "ru.pult.grandma.control.action.SHELL_TAP"
+
+        /** Троттлинг вахты выживания (см. guardMainService): не чаще раза в 30 с. */
+        private const val GUARD_INTERVAL_MS = 30_000L
+
         // Шаг яркости ~10% от диапазона 0..255: заметно бабушке, но не скачком.
         private const val BRIGHTNESS_STEP = 25
         private const val BRIGHTNESS_MIN = 10
@@ -289,7 +347,7 @@ class RemoteControlService : AccessibilityService() {
 
         fun isEnabled(): Boolean = instance != null
 
-        /** Дерево доступности как JSON — для стриминга в панель при записи сценариев. */
+        /** Дерево доступности как JSON — диагностика для помощника по data-каналу. */
         fun dumpTreeJson(): String? {
             val service = instance ?: return null
             val sb = StringBuilder()
@@ -369,7 +427,7 @@ class RemoteControlService : AccessibilityService() {
 
         /**
          * Дамп дерева доступности в файл — ТОЛЬКО для отладки на устройстве владельца.
-         * Нужен, чтобы снять экраны защищённых приложений (BankID) для сценариев:
+         * Нужен, чтобы снять экраны защищённых приложений (BankID):
          * uiautomator их не видит, а служба видит всё дерево.
          */
         fun dumpTree(outputPath: String): Boolean {

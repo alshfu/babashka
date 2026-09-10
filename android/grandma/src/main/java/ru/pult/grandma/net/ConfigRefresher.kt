@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import ru.pult.core.net.SignedConfig
 import ru.pult.grandma.BuildConfig
-import ru.pult.grandma.vpn.TunnelConfig
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -15,7 +14,7 @@ import java.net.URL
  * Источник публичный и может быть скомпрометирован — не важно: без валидной подписи запиненным
  * ключом манифест молча отвергается. Плюс защита от отката: манифест старше применённого не берём.
  *
- * Что обновляем: список эндпоинтов сигналинга (EndpointStore) и конфиг туннеля (TunnelConfig).
+ * Что обновляем: список эндпоинтов сигналинга (EndpointStore).
  * «Скажем приложению, где сегодня брать связь» — но говорим только мы.
  */
 class ConfigRefresher(
@@ -53,12 +52,8 @@ class ConfigRefresher(
             EndpointStore(context).save(manifest.endpoints)
             changed = true
         }
-        manifest.tunnelUri?.takeIf { it.isNotBlank() }?.let {
-            TunnelConfig.save(context, it)
-            changed = true
-        }
         prefs.edit().putLong(KEY_APPLIED, manifest.updatedAt).apply()
-        Log.i(TAG, "конфиг применён: эндпоинтов ${manifest.endpoints.size}, туннель=${manifest.tunnelUri != null}")
+        Log.i(TAG, "конфиг применён: эндпоинтов ${manifest.endpoints.size}")
         return changed
     }
 

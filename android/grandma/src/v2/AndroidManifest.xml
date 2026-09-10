@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Флейвор V2 — управление устройством и сценарии (ТЗ §6, §6а).
+  Флейвор V2 — управление устройством (ТЗ §6).
 
   Здесь и ТОЛЬКО здесь объявляется AccessibilityService. В V1 его нет вовсе (§9, §225):
   именно объявление/включение accessibility ссорит приложение с банками. Разнеся это в
@@ -14,8 +14,7 @@
 
     <application>
 
-        <!-- Управление во время показа + запись/воспроизведение сценариев.
-             Область службы ограничивается в рантайме через packageNames (§177). -->
+        <!-- Управление во время показа: тап/свайп/навигация через dispatchGesture. -->
         <service
             android:name=".control.RemoteControlService"
             android:exported="true"
@@ -27,28 +26,6 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/remote_control_config" />
         </service>
-
-        <!-- Экран сценариев: открывает внук рядом с бабушкой. -->
-        <activity
-            android:name=".ui.ScenariosActivity"
-            android:exported="false"
-            android:label="@string/scenarios_title" />
-
-        <!-- Split-tunnel VPN (стадия 2, каркас). Только выбранные приложения; банки — мимо. -->
-        <service
-            android:name=".vpn.PultVpnService"
-            android:exported="false"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="dataSync">
-            <intent-filter>
-                <action android:name="android.net.VpnService" />
-            </intent-filter>
-        </service>
-
-        <activity
-            android:name=".ui.VpnActivity"
-            android:exported="false"
-            android:label="@string/vpn_title" />
 
         <!-- Прототип низколатентной трансляции (H.264 по WebSocket) — стенд замера задержки.
              Отдельно от обычного показа; тип mediaProjection обязателен на Android 14+. -->
