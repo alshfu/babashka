@@ -741,8 +741,11 @@ class PultService : LifecycleService() {
      * а BankID с ней работать отказывается. PIN берём из настроек (задаётся один раз
      * на телефоне, никуда не уходит).
      */
-    private fun onDeeplink(client: SignalingClient, signal: Signal.Deeplink) =
-        handleDeeplink(client, signal.url)
+    private fun onDeeplink(client: SignalingClient, signal: Signal.Deeplink) {
+        // Вся цепочка (включая ожидание PIN через BankIdPinActivity) — с фонового
+        // потока: latch.await() на главном даёт взаимную блокировку с UI (ANR).
+        Thread { handleDeeplink(client, signal.url) }.start()
+    }
 
     /** Та же цепочка, но без шлюза: локальный диплинк pult://bankid-login (тесты). */
     fun fireTestLogin(url: String) = handleDeeplink(null, url)
