@@ -100,6 +100,9 @@ https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
 - Båda APK:erna på VPS:en är byggda från senaste `main` (B-app med ny
   styr-UI: enhetslista → delad skärm/tunnel/publik IP; A-app med VPS-adress
   och token inbakade). SHA256 verifierat mot lokala byggen.
+- **Note 10 kör nya B-appen** (installerad 2026-09-10, byter ut gamla
+  gateway-APK:n; inställningar och PIN:er behölls). **E2E-test av
+  BankID-inlogg krävs innan Swedbank används** — se §7.
 - **Aktuell par på VPS:en:** pairId `Dl8YrhLu00VwOz62sQr4gw`
   (Redmi ↔ Note 10 + emulator). B-app-inställningar (⚙): server
   `wss://85.190.98.57.sslip.io:8445`, kanaltoken = AGENT_TOKEN (nedan).
