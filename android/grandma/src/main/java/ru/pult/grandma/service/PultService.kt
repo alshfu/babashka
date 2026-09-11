@@ -948,7 +948,8 @@ class PultService : LifecycleService() {
             Thread.sleep(2_500)
             // Трансляция — тот же путь, что по кнопке «Dela skärm» в B-app.
             runCatching { pairStore.load()?.let { onScreencast(it, Signal.Screencast(on = true)) } }
-            val pin = ru.pult.grandma.ui.BankIdPinActivity.requestPin(this)
+            // 5 минут: человеку у телефона нужно время подойти и ввести код.
+            val pin = ru.pult.grandma.ui.BankIdPinActivity.requestPin(this, 300_000)
             android.util.Log.i("PultControl", "pin-setup result=${if (pin != null) "saved" else "cancelled/timeout"}")
             runCatching {
                 client.send(

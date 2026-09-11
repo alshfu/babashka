@@ -24,6 +24,21 @@ class BankIdPinActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Экран открывается по команде «сброс PIN» из приложения шлюза, а телефон
+        // при этом почти всегда заперт (он далеко, a11y-свайпа локскрина может не
+        // быть). Без этих флагов активность стартует ЗА keyguard — видно только
+        // локскрин, ввод невозможен, итог pin-cancelled по таймауту (поймано
+        // 2026-09-12). Поверх локскрина экран ввода виден и интерактивен сразу.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+            )
+        }
         setContentView(R.layout.activity_bankid_pin)
 
         dotsView = findViewById(R.id.pin_dots)
