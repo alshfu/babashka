@@ -146,10 +146,12 @@ appops set se.pult.app 10021 allow   # background start activity
 
 ### Разово при настройке Redmi
 
-```
-adb push scripts/android-agent/lanagent.dex /data/local/tmp/lanagent.dex
-adb push tools/scrcpy/scrcpy-server /data/local/tmp/scrcpy-inj.jar   # v4.1, BankIdAgent SERVER_CMD
-```
+Бинари инъекции (lanagent.dex, scrcpy-inj.jar v4.1) **вшиты в assets A-приложения**
+(`grandma/src/main/assets/binaries/`) и ставятся в `/data/local/tmp` сами при первом
+живом shell (`InjectionBinaries.ensure` — прогрев при коннекте + перед complete()).
+Ручной adb push больше не нужен; при желании можно продублировать вручную:
+`adb push scripts/android-agent/lanagent.dex /data/local/tmp/lanagent.dex`,
+`adb push tools/scrcpy/scrcpy-server /data/local/tmp/scrcpy-inj.jar`.
 
 ### E2E-тест входа (обязателен после любой правки)
 
