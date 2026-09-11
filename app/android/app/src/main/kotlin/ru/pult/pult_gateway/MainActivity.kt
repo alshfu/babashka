@@ -98,6 +98,40 @@ class MainActivity : FlutterActivity() {
                         runOnUiThread { result.success(array.toString()) }
                     }.start()
                 }
+                // Онбординг: кто ловит bankid://. Если не мы — Swedbank-ссылка
+                // уходит в никуда (ActivityNotFound) и вход не инициируется.
+                "isDefaultLinkHandler" -> {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("bankid:///"))
+                        .addCategory(Intent.CATEGORY_BROWSABLE)
+                    val resolved = runCatching {
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            packageManager.resolveActivity(
+                                intent,
+                                android.content.pm.PackageManager.ResolveInfoFlags.of(0),
+                            )
+                        } else {
+                            @Suppress("DEPRECATION")
+                            packageManager.resolveActivity(intent, 0)
+                        }
+                    }.getOrNull()
+                    result.success(resolved?.activityInfo?.packageName == packageName)
+                }
+                // Экран «Открывать по умолчанию» нашего приложения (API 31+).
+                "openLinkSettings" -> {
+                    runCatching {
+                        if (Build.VERSION.SDK_INT >= 31) {
+                            startActivity(
+                                Intent(
+                                    "android.settings.APP_OPEN_BY_DEFAULT_SETTINGS",
+                                    Uri.parse("package:$packageName"),
+                                ),
+                            )
+                        } else {
+                            startActivity(Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS"))
+                        }
+                        result.success(true)
+                    }.onFailure { result.success(false) }
+                }
                 else -> result.notImplemented()
             }
         }

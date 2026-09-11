@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dart_link.dart';
@@ -99,6 +100,12 @@ class LinkBridge extends ChangeNotifier {
 
   bool proxyOn = false;
   bool proxyWanted = true;
+  // Туннель активен; SSID для iOS-профиля — только ввод вручную (iOS не отдаёт
+  // SSID без entitlement).
+  String proxySsid = '';
+  // Android: null = не проверяли. false = bankid:// уходит НЕ в B-app — вход
+  // не инициируется; онбординг показывает карточку со ссылкой в настройки.
+  bool? defaultLinkHandler;
   // Senaste felet från setProxy (t.ex. saknad WRITE_SECURE_SETTINGS) —
   // visas på enhetssidan så man ser varför tunneln inte går.
   String proxyError = '';
@@ -127,8 +134,33 @@ class LinkBridge extends ChangeNotifier {
     await loadDevices();
     unawaited(connect());
     await refreshProxyState();
+    // Онбординг: ловим ли мы bankid:// (только нативный путь — на iOS схема
+    // заявлена в Info.plist и система сама спрашивает разрешение при первом переходе).
+    if (_dart == null) unawaited(checkDefaultLinkHandler());
     // Забытый включённый прокси без живого туннеля — снять, иначе сеть мертва.
     if (proxyOn && !tunnelOnline) await _setProxy(false);
+  }
+
+  /// Android: проверяем, что VIEW bankid:/// разрешается в наше приложение.
+  Future<bool> checkDefaultLinkHandler() async {
+    if (Platform.isIOS) {
+      defaultLinkHandler = true;
+      return true;
+    }
+    try {
+      defaultLinkHandler = await _control.invokeMethod<bool>('isDefaultLinkHandler') ?? false;
+    } catch (_) {
+      defaultLinkHandler = null;
+    }
+    notifyListeners();
+    return defaultLinkHandler ?? false;
+  }
+
+  /// Экран «Открывать по умолчанию» нашего приложения (Android).
+  Future<void> openLinkSettings() async {
+    try {
+      await _control.invokeMethod<void>('openLinkSettings');
+    } catch (_) {}
   }
 
   Future<void> connect() async {
@@ -325,6 +357,48 @@ class LinkBridge extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Генерация iOS-профиля (.mobileconfig): Wi-Fi-пayload с ручным прокси на
+  /// наш туннель для заданного SSID. Установка: поделиться файлом → Настройки
+  /// → «Профиль загружен» → установить; снятие — VPN и управление устройством.
+  /// Возвращает файл или null, если не хватает данных (SSID/IP).
+  Future<File?> generateProxyProfile() async {
+    final ip = proxyLanIp ?? await TunnelProxyService.lanIp();
+    final ssid = proxySsid.trim();
+    if (ip == null || ssid.isEmpty) return null;
+    final base = DateTime.now().millisecondsSinceEpoch;
+    String esc(String s) =>
+        s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    final xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.wifi.managed</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>io.pult.wifi.tunnel.$base</string>
+      <key>PayloadUUID</key><string>50454C54-$base-0000-0000-000000000001</string>
+      <key>SSID_STR</key><string>${esc(ssid)}</string>
+      <key>ProxyType</key><string>Manual</string>
+      <key>ProxyServer</key><string>${esc(ip)}</string>
+      <key>ProxyServerPort</key><integer>8877</integer>
+    </dict>
+  </array>
+  <key>PayloadDisplayName</key><string>Pult Tunnel</string>
+  <key>PayloadDescription</key><string>Manual proxy to the Pult device tunnel on Wi-Fi «${esc(ssid)}»</string>
+  <key>PayloadIdentifier</key><string>io.pult.tunnel.profile.$base</string>
+  <key>PayloadUUID</key><string>50454C54-$base-0000-0000-000000000000</string>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+</dict>
+</plist>
+''';
+    final file = File('${Directory.systemTemp.path}/pult-tunnel.mobileconfig');
+    await file.writeAsString(xml);
+    return file;
   }
 
   /// Publik IP — через активный прокси (свой Dart-прокси или системный на
@@ -582,6 +656,36 @@ class _DeviceListPageState extends State<DeviceListPage> with WidgetsBindingObse
             padding: const EdgeInsets.all(16),
             children: [
               if (!client.online) _offlineBanner(),
+              // Онбординг Android: без статуса «по умолчанию для bankid://» Swedbank-
+              // ссылка уходит в никуда и вход не инициируется — показываем, пока не настроено.
+              if (client.defaultLinkHandler == false)
+                Card(
+                  color: Colors.orange.withOpacity(0.15),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.open_in_browser, color: Colors.orange),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'BankID-länkar öppnas inte i Pult ännu. Utan det startar inloggningen inte.',
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            await client.openLinkSettings();
+                            // Возврат с экрана настроек — перепроверяем статус.
+                            await Future<void>.delayed(const Duration(seconds: 2));
+                            await client.checkDefaultLinkHandler();
+                          },
+                          child: const Text('Ställ in'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (client.devices.isEmpty)
                 const Card(
                   child: Padding(
@@ -705,6 +809,40 @@ class _DevicePageState extends State<DevicePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(err.isEmpty ? 'Väckningspush skickad' : err)),
     );
+  }
+
+  /// «Свой канал»: отправить bankid-диплинк на A-app вручную (перехват от
+  /// Swedbank — тот же путь автоматически; это ручной/тестовый ввод).
+  Future<void> _downloadProfile() async {
+    final ssidCtrl = TextEditingController(text: client.proxySsid);
+    final ssid = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Wi-Fi-nätverk (SSID)'),
+        content: TextField(
+          controller: ssidCtrl,
+          decoration: const InputDecoration(labelText: 'Namnet på det Wi-Fi du använder'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Avbryt')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ssidCtrl.text.trim()),
+            child: const Text('Skapa profil'),
+          ),
+        ],
+      ),
+    );
+    if (ssid == null || ssid.isEmpty || !mounted) return;
+    client.proxySsid = ssid;
+    final file = await client.generateProxyProfile();
+    if (!mounted) return;
+    if (file == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kunde inte skapa profilen — starta tunneln först')),
+      );
+      return;
+    }
+    await Share.shareXFiles([XFile(file.path)], text: 'Pult Tunnel-profil');
   }
 
   /// «Свой канал»: отправить bankid-диплинк на A-app вручную (перехват от
@@ -845,11 +983,28 @@ class _DevicePageState extends State<DevicePage> {
                     color: Colors.blue.withOpacity(0.12),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: Text(
-                        'För att hela iPhone ska gå via enheten: Inställningar → Wi-Fi → (i) bredvid nätverket → '
-                        'Konfigurera proxy → Manuellt → Server ${client.proxyLanIp}, port 8877. '
-                        'Stäng av proxyn där när du är klar.',
-                        style: const TextStyle(fontSize: 13),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'För att hela iPhone ska gå via enheten: installera proxy-profilen '
+                            'nedan, eller ställ in manuellt (Inställningar → Wi-Fi → (i) → '
+                            'Konfigurera proxy → Manuellt). Stäng av proxyn när du är klar.',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Profilen kopplar proxy till nuvarande IP ${client.proxyLanIp} — '
+                            'om routern byter iPhones IP, generera profilen på nytt.',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton.icon(
+                            onPressed: _busy ? null : _downloadProfile,
+                            icon: const Icon(Icons.download),
+                            label: const Text('Ladda ner proxy-profil'),
+                          ),
+                        ],
                       ),
                     ),
                   ),
