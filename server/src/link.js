@@ -92,6 +92,9 @@ export function createLinkChannel({ config, hub }) {
 
   /** Статус подписания с телефона → во все подключённые приложения. */
   function notifyStatus(pairId, status) {
+    // Без этой строки сервер «слепой» к итогу на телефоне: доставка диплинка
+    // (delivered) ≠ BankID открыт/подписан — различие видно только здесь.
+    log.info('link: deeplink-status', { pairId, ...status });
     notify(pairId, { t: 'deeplink-status', ...status });
   }
 
