@@ -306,14 +306,6 @@
       "description": "Приложение → телефон бабушки: показать экран ввода BankID-PIN (+ включить skärmdelning). Вводит человек у телефона (сброс/смена PIN); итог — deeplink-status со stage=pin-saved|pin-cancelled.",
       "properties": { "t": { "const": "pin-setup" } }
     },
-    "pin-set": {
-      "required": ["t", "pin"],
-      "description": "Приложение → телефон бабушки: записать BankID-PIN, введённый владельцем удалённо (телефон далеко). PIN не журналируется сервером. Итог — deeplink-status со stage=pin-saved|pin-rejected.",
-      "properties": {
-        "t": { "const": "pin-set" },
-        "pin": { "type": "string", "pattern": "^\\d{4,8}$" }
-      }
-    },
     "update-status": {
       "required": ["t", "pairId", "kind", "version", "ok", "at"],
       "description": "Телефон бабушки → приложение (через сервер): итог установки обновления. Сервер добавляет pairId и at.",

@@ -79,28 +79,6 @@ test('/link: pin-setup доезжает до телефона бабушки, и
   assert.deepEqual({ ok: status.ok, stage: status.stage }, { ok: true, stage: 'pin-saved' });
 });
 
-test('/link: pin-set доезжает до телефона, нецифровой PIN отбраковывается на сервере', async (t) => {
-  const { port, url } = await start(t);
-  const pair = pairId('pinset');
-
-  const grandma = await TestClient.connect(url);
-  await grandma.hello({ pairId: pair, role: 'grandma' });
-
-  const app = await TestClient.connect(linkUrl(port, pair));
-  app.send({ t: 'pin-set', pin: '483921' });
-
-  const ack = await app.next('deeplink-ack');
-  assert.equal(ack.delivered, true);
-  const onPhone = await grandma.next('pin-set');
-  assert.equal(onPhone.pin, '483921');
-
-  // Формат валидируется на сервере: мусор до телефона не доходит.
-  app.send({ t: 'pin-set', pin: '12ab' });
-  const badAck = await app.next('deeplink-ack');
-  assert.equal(badAck.delivered, false);
-  assert.deepEqual(await grandma.silentFor(150), []);
-});
-
 test('/link: не-bankid URL не маршрутизируется', async (t) => {
   const { port, url } = await start(t);
   const pair = pairId('d');

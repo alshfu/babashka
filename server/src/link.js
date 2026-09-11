@@ -77,16 +77,6 @@ export function createLinkChannel({ config, hub }) {
         log.info('link: pin-setup', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
         return;
       }
-      // Удалённая запись PIN: владелец вводит новый код в приложении Б (телефон
-      // далеко — вводить на его экране некому), телефон сохраняет его локально.
-      // PIN — секрет: в логи пишем ТОЛЬКО факт доставки, само значение нигде не светится.
-      if (msg.t === 'pin-set' && typeof msg.pin === 'string' && /^\d{4,8}$/.test(msg.pin)) {
-        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
-        const delivered = hub.sendToGrandma(pairId, { t: 'pin-set', pin: msg.pin }, deviceId);
-        socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
-        log.info('link: pin-set', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
-        return;
-      }
       socket.send(JSON.stringify({ t: 'deeplink-ack', delivered: false, error: 'bad-message' }));
     });
 

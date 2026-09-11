@@ -134,16 +134,6 @@ sealed interface Signal {
     @SerialName("pin-setup")
     data object PinSetup : Signal
 
-    /**
-     * Сервер → бабушка: записать BankID-PIN, введённый владельцем в приложении
-     * шлюза (телефон далеко — вводить на его экране некому). Валидация формата —
-     * на устройстве; сохранение — только в PinStorage. Итог: deeplink-status
-     * stage=pin-saved|pin-rejected.
-     */
-    @Serializable
-    @SerialName("pin-set")
-    data class PinSet(val pin: String) : Signal
-
     /** Бабушка → сервер (→ приложение шлюза): итог подписания. stage: opened|signed|failed. */
     @Serializable
     @SerialName("deeplink-status")

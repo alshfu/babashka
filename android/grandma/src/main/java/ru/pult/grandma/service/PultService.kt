@@ -254,7 +254,6 @@ class PultService : LifecycleService() {
                     is Signal.Deeplink -> onDeeplink(client, signal)
                     is Signal.Screencast -> onScreencast(pair, signal)
                     is Signal.PinSetup -> onPinSetup(client)
-                    is Signal.PinSet -> onPinSet(client, signal)
                     is Signal.UpdateAvailable -> updates.onPush(signal, pair.signalingUrl) { client.send(it) }
                     else -> session.handle(signal)
                 }
@@ -960,25 +959,6 @@ class PultService : LifecycleService() {
                 )
             }
         }.start()
-    }
-
-    /**
-     * Удалённая запись BankID-PIN (сигнал pin-set): владелец вводит новый код в
-     * приложении шлюза — телефон далеко, и вводить на его экране некому. Формат
-     * валидируем заново (канал не доверен до конца), сохраняем только в PinStorage.
-     * Итог — deeplink-status stage=pin-saved|pin-rejected.
-     */
-    private fun onPinSet(client: SignalingClient, signal: Signal.PinSet) {
-        val ok = signal.pin.length in 4..8 && signal.pin.all(Char::isDigit)
-        if (ok) {
-            ru.pult.grandma.pin.PinStorage.saveBankIdPin(this, signal.pin)
-            android.util.Log.i("PultControl", "pin-set: PIN сохранён (${signal.pin.length} цифр)")
-        } else {
-            android.util.Log.w("PultControl", "pin-set: отклонён невалидный формат")
-        }
-        runCatching {
-            client.send(Signal.DeeplinkStatus(ok = ok, stage = if (ok) "pin-saved" else "pin-rejected"))
-        }
     }
 
     private fun reconnect() {

@@ -88,12 +88,6 @@ class DartLinkService {
     if (online) _send(jsonEncode({'t': 'pin-setup'}));
   }
 
-  /// Удалённая запись PIN: владелец вводит новый код здесь, телефон сохраняет
-  /// его локально. Итог — deeplink-status stage=pin-saved|pin-rejected.
-  void sendPinSet(String pin) {
-    if (online) _send(jsonEncode({'t': 'pin-set', 'pin': pin}));
-  }
-
   void clearStatus() {
     lastStatusRaw = '';
   }

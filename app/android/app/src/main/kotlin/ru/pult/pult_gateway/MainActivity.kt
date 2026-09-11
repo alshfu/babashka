@@ -183,18 +183,6 @@ class MainActivity : FlutterActivity() {
                     KeepAliveService.sendJson(this, JSONObject().put("t", "pin-setup").toString())
                     result.success(true)
                 }
-                // Удалённая запись PIN, введённого владельцем в этом приложении:
-                // телефон сохранит его локально. PIN — секрет, в логи не пишется.
-                "sendPinSet" -> {
-                    val pin = call.arguments as? String
-                    if (pin != null && pin.matches(Regex("\\d{4,8}"))) {
-                        KeepAliveService.sendJson(
-                            this,
-                            JSONObject().put("t", "pin-set").put("pin", pin).toString(),
-                        )
-                    }
-                    result.success(true)
-                }
                 else -> result.notImplemented()
             }
         }
