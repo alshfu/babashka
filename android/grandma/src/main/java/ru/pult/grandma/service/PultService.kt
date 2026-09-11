@@ -698,9 +698,9 @@ class PultService : LifecycleService() {
      * а autostart-token при этом уже сгорает — поэтому без проверки переднего плана нельзя.
      *
      * Порядок: прямой startActivity → 4 с опроса UsageStats (com.bankid.bus наверху?) →
-     * full-screen intent-уведомление (путь «будильника», работает на MIUI) → shell
-     * `am start` (только если startActivity упал, уведомление показать нельзя и
-     * adbd-сессия уже жива — поднимать её из этого пути нельзя, см. onDeeplink).
+     * full-screen intent-уведомление (путь «будильника»; на Android 14+ доступен не всем
+     * приложениям) → shell `am start` по УЖЕ живой сессии (на MIUI прямой старт «успешен»
+     * молча, BankID остаётся в фоне — shell единственный надёжный путь, см. onDeeplink).
      * Итог — строка raise=direct|fsi|shell|failed:… — с деталями отказа: телефон далеко
      * и логcat недоступен, единственная телеметрия — это err в deeplink-status.
      */
@@ -744,12 +744,21 @@ class PultService : LifecycleService() {
                 return "fsi"
             }
         }
-        // Последний резерв — shell (требует wireless debugging): только когда прямой
-        // старт упал, уведомление показать нельзя и сессия adbd УЖЕ жива. Иначе
-        // openDeeplink полез бы поднимать подключение (паринг, включение adb_wifi) —
-        // а с ним BankID работать отказывается.
+        // Последний резерв — shell (требует живой сессии): на MIUI прямой startActivity
+        // «успешен» без исключения, но BankID остаётся в фоне (direct=no-fg) — старое
+        // условие direct.isFailure его поэтому никогда не ловило. Раньше тут стояло ещё
+        // !canFsi — но на Android 14+ FSI отобран у обычных приложений (fsi=false), и
+        // shell при живой сессии надёжнее любого UI-пути. Поднимать сессию из этого
+        // места по-прежнему нельзя (паринг/adb_wifi включил бы отладку — BankID встанет),
+        // используем ТОЛЬКО уже живую.
         val liveSession = ru.pult.grandma.control.AdbShell.hasLiveSession()
-        if (direct.isFailure && !canFsi && liveSession) {
+        if (liveSession) {
+            // Android 14+ отбирает USE_FULL_SCREEN_INTENT у обычных приложений. Выдаём
+            // себе appop через живой shell — одноразово, дальше путь «будильника» живёт
+            // сам даже когда сессии нет (fsi станет true).
+            ru.pult.grandma.control.AdbShell.exec(
+                "cmd appops set $packageName android:full_screen_intent allow", 8_000,
+            )
             if (ru.pult.grandma.control.BankIdAgent.openDeeplink(url)) {
                 android.util.Log.i(TAG_BANKID, "raise=shell")
                 return "shell"
