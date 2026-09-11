@@ -64,14 +64,18 @@ class Device {
 
 class LinkBridge extends ChangeNotifier {
   static const defaultServer = 'wss://85.190.98.57.sslip.io:8445';
-  static const defaultPairId = 'demo-pair-000000000000';
+  static const defaultPairId = 'Dl8YrhLu00VwOz62sQr4gw';
+  static const defaultToken = 'Pxj6sCxMzQEsthyDRyLaV6IfM9zFu5M5';
+  // Inkakade inställningar: höj när default-värdena ändras — då skrivs de
+  // över i befintliga installationer vid nästa start (init → _loadSettings).
+  static const defaultsVersion = 2;
   static const _ch = MethodChannel('pult.gateway/link');
   static const _control = MethodChannel('pult.gateway/control');
   static const tunnelPort = 8877;
 
   String server = defaultServer;
   String pairId = defaultPairId;
-  String token = '';
+  String token = defaultToken;
   String? selectedDeviceId;
 
   bool online = false;
@@ -82,6 +86,9 @@ class LinkBridge extends ChangeNotifier {
 
   bool proxyOn = false;
   bool proxyWanted = true;
+  // Senaste felet från setProxy (t.ex. saknad WRITE_SECURE_SETTINGS) —
+  // visas på enhetssidan så man ser varför tunneln inte går.
+  String proxyError = '';
 
   List<Device> devices = [];
 
@@ -190,8 +197,10 @@ class LinkBridge extends ChangeNotifier {
     try {
       await _setProxy(on);
       proxyOn = on;
-    } catch (_) {
+      proxyError = '';
+    } catch (e) {
       proxyOn = false;
+      proxyError = 'Proxy kräver WRITE_SECURE_SETTINGS (adb: pm grant com.bankid.bus android.permission.WRITE_SECURE_SETTINGS): $e';
     }
     proxyWanted = on;
     await _saveSettings();
@@ -241,9 +250,23 @@ class LinkBridge extends ChangeNotifier {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    server = prefs.getString('server') ?? defaultServer;
-    pairId = prefs.getString('pairId') ?? defaultPairId;
-    token = prefs.getString('token') ?? '';
+    // Inkakade inställningar vinner en gång per defaultsVersion: befintliga
+    // installationer med gamla/tomma värden får de nya standardvärdena skrivna
+    // över sina prefs innan /link-servicen startas om (init → connect).
+    final v = prefs.getInt('defaultsVersion') ?? 0;
+    if (v < defaultsVersion) {
+      server = defaultServer;
+      pairId = defaultPairId;
+      token = defaultToken;
+      await prefs.setString('server', server);
+      await prefs.setString('pairId', pairId);
+      await prefs.setString('token', token);
+      await prefs.setInt('defaultsVersion', defaultsVersion);
+    } else {
+      server = prefs.getString('server') ?? defaultServer;
+      pairId = prefs.getString('pairId') ?? defaultPairId;
+      token = prefs.getString('token') ?? defaultToken;
+    }
     selectedDeviceId = prefs.getString('selectedDeviceId');
     proxyWanted = prefs.getBool('proxyWanted') ?? true;
   }
@@ -555,6 +578,14 @@ class _DevicePageState extends State<DevicePage> {
                       client.tunnelOnline ? 'Tunnelkanalen är uppe' : 'Tunnelkanalen är inte uppe',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
                     ),
+                    if (client.proxyError.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          client.proxyError,
+                          style: const TextStyle(fontSize: 12, color: Colors.orange),
+                        ),
+                      ),
                   ],
                 ),
               ),
