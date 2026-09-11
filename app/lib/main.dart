@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'dart_link.dart';
 import 'screencast.dart';
 
 /// B-app (Controller) på Note 10.
@@ -73,6 +75,12 @@ class LinkBridge extends ChangeNotifier {
   static const _control = MethodChannel('pult.gateway/control');
   static const tunnelPort = 8877;
 
+  // iOS: нативного слоя канала нет (KeepAliveService — Android-only), поэтому
+  // /link держим прямо в Dart (dart_link.dart). Семантика та же, что у нативной.
+  DartLinkService? _dart;
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _appLinkSub;
+
   String server = defaultServer;
   String pairId = defaultPairId;
   String token = defaultToken;
@@ -97,6 +105,19 @@ class LinkBridge extends ChangeNotifier {
       if (call.method == 'changed') await refresh();
     });
     await _loadSettings();
+    if (Platform.isIOS) {
+      final dart = DartLinkService();
+      _dart = dart;
+      dart.events.listen((event) {
+        _applyStatusRaw(event.rawJson);
+        notifyListeners();
+      });
+      // Перехват bankid:// от Swedbank: iOS доставляет схему, заявленную в
+      // Info.plist (CFBundleURLTypes), плагином app_links.
+      _appLinkSub = _appLinks.uriLinkStream.listen(_onAppLink);
+      final initial = await _appLinks.getInitialLink();
+      if (initial != null) _onAppLink(initial);
+    }
     await refresh();
     await loadDevices();
     unawaited(connect());
@@ -107,31 +128,48 @@ class LinkBridge extends ChangeNotifier {
 
   Future<void> connect() async {
     try {
-      await _ch.invokeMethod<void>('reloadLink');
+      final dart = _dart;
+      if (dart != null) {
+        await dart.reload(server, pairId, token);
+      } else {
+        await _ch.invokeMethod<void>('reloadLink');
+      }
+      await refresh();
+    } catch (_) {}
+  }
+
+  /// Принудительный переподключение. iOS: после возврата из фона сокет часто
+  /// мёртв, а onDone/onError не приходили во время сна — reload() с тем же
+  /// эндпоинтом сочтёт его живым и не пересоединится. Здесь — без раннего выхода.
+  Future<void> reconnect() async {
+    final dart = _dart;
+    if (dart == null) {
+      await connect();
+      return;
+    }
+    try {
+      await dart.forceReload(server, pairId, token);
       await refresh();
     } catch (_) {}
   }
 
   Future<void> refresh() async {
-    try {
-      final state = await _ch.invokeMethod<Map<dynamic, dynamic>>('getState');
-      online = state?['online'] == true;
-      tunnelOnline = state?['tunnelOnline'] == true;
-      tunnelStreams = (state?['tunnelStreams'] as int?) ?? 0;
-      final raw = (state?['lastStatus'] as String?) ?? '';
-      if (raw.isNotEmpty) {
-        final msg = jsonDecode(raw) as Map<String, dynamic>;
-        final s = msg['stage'] as String? ?? '';
-        stage = switch (s) {
-          'sent' => SignStage.sent,
-          'opened' => SignStage.opened,
-          'signing' => SignStage.signing,
-          'signed' => SignStage.signed,
-          _ => SignStage.failed,
-        };
-        lastError = msg['ok'] == true ? '' : (msg['err'] as String? ?? 'fel');
-      }
-    } catch (_) {}
+    final dart = _dart;
+    if (dart != null) {
+      online = dart.online;
+      // Нативного туннеля на iOS нет — только прямой канал /link.
+      tunnelOnline = false;
+      tunnelStreams = 0;
+      _applyStatusRaw(dart.lastStatusRaw);
+    } else {
+      try {
+        final state = await _ch.invokeMethod<Map<dynamic, dynamic>>('getState');
+        online = state?['online'] == true;
+        tunnelOnline = state?['tunnelOnline'] == true;
+        tunnelStreams = (state?['tunnelStreams'] as int?) ?? 0;
+        _applyStatusRaw((state?['lastStatus'] as String?) ?? '');
+      } catch (_) {}
+    }
     // Туннель умер — прокси недействителен; туннель поднялся — вернуть прокси,
     // если он был желан (Swedbank-трафик Note 10 должен выходить со шведским IP).
     if (!tunnelOnline && proxyOn) {
@@ -144,18 +182,25 @@ class LinkBridge extends ChangeNotifier {
   }
 
   Future<void> clearStatus() async {
-    try {
-      await _ch.invokeMethod<void>('clearStatus');
-    } catch (_) {}
+    final dart = _dart;
+    if (dart != null) {
+      dart.clearStatus();
+    } else {
+      try {
+        await _ch.invokeMethod<void>('clearStatus');
+      } catch (_) {}
+    }
     stage = SignStage.idle;
     lastError = '';
     notifyListeners();
   }
 
   Future<void> loadDevices() async {
+    final dart = _dart;
     try {
-      final raw = await _control.invokeMethod<String>('getDevices');
-      final list = jsonDecode(raw ?? '[]') as List<dynamic>;
+      final list = dart != null
+          ? await dart.fetchDevices(server, pairId, token)
+          : jsonDecode(await _control.invokeMethod<String>('getDevices') ?? '[]') as List<dynamic>;
       devices = list.map((it) {
         final m = it as Map<String, dynamic>;
         return Device(
@@ -175,6 +220,12 @@ class LinkBridge extends ChangeNotifier {
   }
 
   Future<bool> sendScreencast(bool on) async {
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendScreencast(on);
+      return true;
+    }
     try {
       await _ch.invokeMethod<void>('sendScreencast', on);
       return true;
@@ -200,7 +251,9 @@ class LinkBridge extends ChangeNotifier {
       proxyError = '';
     } catch (e) {
       proxyOn = false;
-      proxyError = 'Proxy kräver WRITE_SECURE_SETTINGS (adb: pm grant com.bankid.bus android.permission.WRITE_SECURE_SETTINGS): $e';
+      proxyError = Platform.isIOS
+          ? 'Global proxy stöds inte på iOS (tunnel via proxy är en Android-funktion): $e'
+          : 'Proxy kräver WRITE_SECURE_SETTINGS (adb: pm grant com.bankid.bus android.permission.WRITE_SECURE_SETTINGS): $e';
     }
     proxyWanted = on;
     await _saveSettings();
@@ -235,6 +288,35 @@ class LinkBridge extends ChangeNotifier {
     }
   }
 
+  /// Команда реанимации на A-app (server → FCM → телефон действует сам):
+  /// action = restart (мягкий) | reboot (перезагрузка устройства).
+  /// Возвращает пустую строку при успехе, иначе текст ошибки.
+  Future<String> reanimate(String action) async {
+    final base = server.startsWith('wss://')
+        ? 'https://${server.substring(6)}'
+        : server.startsWith('ws://')
+            ? 'http://${server.substring(5)}'
+            : server;
+    final client = HttpClient();
+    try {
+      final request = await client
+          .postUrl(Uri.parse('$base/api/reanimate'))
+          .timeout(const Duration(seconds: 10));
+      request.headers.contentType = ContentType.json;
+      request.headers.set('x-agent-token', token);
+      request.write(jsonEncode({'pairId': pairId, 'action': action}));
+      final response = await request.close().timeout(const Duration(seconds: 15));
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 200) return 'Fel: HTTP ${response.statusCode}';
+      final m = jsonDecode(body) as Map<String, dynamic>;
+      return m['sent'] == true ? '' : 'Push levererades inte — enheten saknar FCM-token?';
+    } catch (e) {
+      return 'Fel: $e';
+    } finally {
+      client.close();
+    }
+  }
+
   /// Страница просмотра lowlat-трансляции (room=demo — так же жёстко задано в A-app).
   /// Токен пары передаём странице: релей принимает команды управления (тап/свайп)
   /// только от панелей с токеном — без него страница только смотрит.
@@ -245,7 +327,7 @@ class LinkBridge extends ChangeNotifier {
     } else if (base.startsWith('ws://')) {
       base = 'http://${base.substring(5)}';
     }
-    return '$base/panel/lowlat.html?room=demo&token=${Uri.encodeQueryComponent(token)}';
+    return '$base/panel/lowlat.html?room=demo&token=${Uri.encodeQueryComponent(token)}&fs=1';
   }
 
   Future<void> _loadSettings() async {
@@ -291,6 +373,48 @@ class LinkBridge extends ChangeNotifier {
     this.token = token;
     await _saveSettings();
   }
+
+  /// Разбор сырого lastStatus (тот же JSON, что публикует нативный слой Android).
+  void _applyStatusRaw(String raw) {
+    if (raw.isEmpty) return;
+    try {
+      final msg = jsonDecode(raw) as Map<String, dynamic>;
+      final s = msg['stage'] as String? ?? '';
+      stage = switch (s) {
+        'sent' => SignStage.sent,
+        'opened' => SignStage.opened,
+        'signing' => SignStage.signing,
+        'signed' => SignStage.signed,
+        _ => SignStage.failed,
+      };
+      lastError = msg['ok'] == true ? '' : (msg['err'] as String? ?? 'fel');
+    } catch (_) {}
+  }
+
+  /// bankid:// от Swedbank (через app_links) → в канал /link на выбранную A-app.
+  /// Нормализация — как normalizeBankIdUrl() в MainActivity.kt.
+  void _onAppLink(Uri uri) {
+    final url = _normalizeBankIdUrl(uri);
+    if (url.isEmpty) return;
+    _dart?.sendDeeplink(url, selectedDeviceId);
+  }
+
+  static String _normalizeBankIdUrl(Uri uri) {
+    if (uri.scheme == 'bankid') return uri.toString();
+    if (uri.scheme == 'https' && uri.host == 'app.bankid.com') {
+      final path = uri.path.replaceFirst(RegExp('^/'), '');
+      final query = uri.hasQuery ? '?${uri.query}' : '';
+      return 'bankid:///$path$query';
+    }
+    return '';
+  }
+
+  @override
+  void dispose() {
+    _appLinkSub?.cancel();
+    unawaited(_dart?.dispose());
+    super.dispose();
+  }
 }
 
 /// Första skärmen: listan över tillgängliga enheter.
@@ -301,20 +425,32 @@ class DeviceListPage extends StatefulWidget {
   State<DeviceListPage> createState() => _DeviceListPageState();
 }
 
-class _DeviceListPageState extends State<DeviceListPage> {
+class _DeviceListPageState extends State<DeviceListPage> with WidgetsBindingObserver {
   late final LinkBridge client;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     client = LinkBridge();
     client.init();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     client.dispose();
     super.dispose();
+  }
+
+  /// Возврат из фона: iOS могла усыпить сокет без событий — переподключаемся
+  /// принудительно и обновляем список устройств.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(client.reconnect());
+      unawaited(client.loadDevices());
+    }
   }
 
   void _openSettings() {
@@ -429,7 +565,9 @@ class _DeviceListPageState extends State<DeviceListPage> {
         trailing: selected
             ? const Icon(Icons.check_circle, color: Colors.green)
             : const Icon(Icons.chevron_right),
-        onTap: device.online ? () => _openDevice(device) : null,
+        // Страница устройства открывается и офлайн: оттуда как раз работает
+        // реаниматор (FCM-будильник нужен именно мёртвому устройству).
+        onTap: () => _openDevice(device),
       ),
     );
   }
@@ -495,6 +633,59 @@ class _DevicePageState extends State<DevicePage> {
     if (mounted) setState(() => _ipTestResult = result);
   }
 
+  /// Будильник: разбудить устройство push-ем (FCM wake — сервис поднимется сам).
+  Future<void> _wakeDevice() async {
+    setState(() => _busy = true);
+    final err = await client.reanimate('wake');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(err.isEmpty ? 'Väckningspush skickad' : err)),
+    );
+  }
+
+  /// Мягкая реанимация: переподключение сигналинга на устройстве (FCM → restart).
+  Future<void> _restartService() async {
+    setState(() => _busy = true);
+    final err = await client.reanimate('restart');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(err.isEmpty ? 'Omstarts kommando skickat till enheten' : err)),
+    );
+  }
+
+  /// Жёсткая реанимация: перезагрузка устройства (FCM → reboot через shell).
+  Future<void> _rebootDevice() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Starta om enheten?'),
+        content: const Text(
+          'Telefonen startas om direkt. Allt pågående (samtal, signering) avbryts.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Avbryt'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Starta om'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    setState(() => _busy = true);
+    final err = await client.reanimate('reboot');
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(err.isEmpty ? 'Omstart kommenderad — enheten bootar om' : err)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -514,6 +705,18 @@ class _DevicePageState extends State<DevicePage> {
             padding: const EdgeInsets.all(16),
             children: [
               _header(),
+              if (!widget.device.online) ...[
+                const SizedBox(height: 12),
+                Card(
+                  color: Colors.orange.withOpacity(0.15),
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      'Enheten är inte ansluten. Omstartsknapparna nedan fungerar ändå — de väcker enheten via push.',
+                    ),
+                  ),
+                ),
+              ],
               if (label.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _signStatusCard(label, color),
@@ -523,16 +726,50 @@ class _DevicePageState extends State<DevicePage> {
                 icon: _screencastOn ? Icons.stop_screen_share : Icons.screen_share,
                 label: _screencastOn ? 'Stoppa skärmdelning' : 'Dela skärm',
                 color: _screencastOn ? Colors.red : null,
-                onPressed: _toggleScreencast,
+                onPressed: widget.device.online ? _toggleScreencast : null,
               ),
               const SizedBox(height: 12),
-              _bigButton(
-                icon: client.proxyOn ? Icons.stop : Icons.vpn_key,
-                label: client.proxyOn
-                    ? 'Tunnel påslagen (${client.tunnelStreams} strömmar) – stoppa'
-                    : 'Skicka all trafik via ${widget.device.displayName}',
-                color: client.proxyOn ? Colors.green : null,
-                onPressed: client.tunnelOnline || client.proxyOn ? _toggleTunnel : null,
+              // Туннель «весь трафик через устройство» — Android-only (нужен
+              // глобальный прокси через WRITE_SECURE_SETTINGS); на iOS кнопку
+              // не показываем вовсе, чтобы не соблазнять мёртвой функцией.
+              if (!Platform.isIOS)
+                _bigButton(
+                  icon: client.proxyOn ? Icons.stop : Icons.vpn_key,
+                  label: client.proxyOn
+                      ? 'Tunnel påslagen (${client.tunnelStreams} strömmar) – stoppa'
+                      : 'Skicka all trafik via ${widget.device.displayName}',
+                  color: client.proxyOn ? Colors.green : null,
+                  onPressed: client.tunnelOnline || client.proxyOn ? _toggleTunnel : null,
+                ),
+              if (!Platform.isIOS) const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _wakeDevice,
+                  icon: const Icon(Icons.notifications_active),
+                  label: const Text('Väck enheten (push)'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _restartService,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Starta om tjänsten (mjuk återstart)'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _rebootDevice,
+                  icon: const Icon(Icons.restart_alt, color: Colors.red),
+                  label: const Text(
+                    'Starta om enheten (omstart)',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               SizedBox(
@@ -574,10 +811,11 @@ class _DevicePageState extends State<DevicePage> {
                       widget.device.subtitle,
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
                     ),
-                    Text(
-                      client.tunnelOnline ? 'Tunnelkanalen är uppe' : 'Tunnelkanalen är inte uppe',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-                    ),
+                    if (!Platform.isIOS)
+                      Text(
+                        client.tunnelOnline ? 'Tunnelkanalen är uppe' : 'Tunnelkanalen är inte uppe',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+                      ),
                     if (client.proxyError.isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: 4),
