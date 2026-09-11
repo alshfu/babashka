@@ -304,6 +304,9 @@ class PultService : LifecycleService() {
                 "uiautomator dump /data/local/tmp/ba-ui.xml", 30_000,
             )
             android.util.Log.i("PultAdb", "warmup ok=$ok ${out.take(60)}")
+            // Бинари инъекции (LanAgent + scrcpy-server) — раньше пушились руками при
+            // настройке; теперь вшиты в assets и ставятся сами при первом живом shell.
+            ru.pult.grandma.control.InjectionBinaries.ensure(this)
             // LanAgent — постоянный on-device канал ввода (TCP loopback, не виден
             // BankID, переживает выключение wireless debugging). dex лежит в
             // /data/local/tmp (ставится один раз при настройке, переживает ребуты).
@@ -894,6 +897,9 @@ class PultService : LifecycleService() {
                 return@Thread
             }
             android.util.Log.i("PultControl", "deeplink opened, completing BankID locally")
+            // Бинари инъекции (scrcpy-server/lanagent) — если вдруг не встали при
+            // коннекте, ставим сейчас: сессия жива, горячий момент это лечит.
+            ru.pult.grandma.control.InjectionBinaries.ensure(this)
             // Долгая последовательность (десятки секунд) — в этом же фоновом потоке.
             val err = ru.pult.grandma.control.BankIdAgent.complete(pin, lockPin)
             runCatching {
