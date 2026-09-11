@@ -133,6 +133,16 @@ class MainActivity : FlutterActivity() {
                     KeepAliveService.sendJson(this, payload)
                     result.success(true)
                 }
+                // Ручная отправка диплинка из UI (то же «свой канал» B→A, что и
+                // перехват bankid:// от Swedbank): URL валидируем и уходим в сервис.
+                "sendDeeplink" -> {
+                    val url = call.arguments as? String
+                    if (url != null && url.startsWith("bankid:///")) {
+                        val deviceId = prefs().getString("flutter.selectedDeviceId", null)
+                        KeepAliveService.sendDeeplink(this, url, deviceId)
+                    }
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

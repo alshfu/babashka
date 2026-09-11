@@ -101,6 +101,22 @@ Swedbank → tap «Logga in»
   Note 10, оставлен без изменений. На iOS системного прокси нет (нужен Network
   Extension, заблокирован до починки Apple ID) — iPhone ходит через VPS-шлюз.
 
+### «Свой канал» B→A: BankID активируется ТОЛЬКО по запросу из B-app
+
+A-app поднимает BankID исключительно по `Signal.Deeplink` с сервера (хаб пары
+аутентифицирован; канал /link — токеном AGENT_TOKEN). Два легальных пути запроса
+из B-app, оба сходятся в один и тот же `/link`-кадр `{t:deeplink,url,deviceId}`:
+1. **Перехват** — Swedbank открывает `bankid://`, B-app ловит схему (Android:
+   intent → KeepAliveService; iOS: app_links → DartLinkService) и пересылает.
+2. **Ручной** — кнопка «Skicka bankid-länk» на странице устройства (диалог с
+   вводом `bankid:///…`; Android: channel `pult.gateway/link` →
+   `KeepAliveService.sendDeeplink`, iOS: DartLinkService.sendDeeplink).
+Прочих путей нет: локальный тестовый диплинк `pult://bankid-login` из MainActivity
+A-app — осознанное исключение для отладки без сервера. A отвечает статусами
+(`deeplink-status`: sent → opened → signed/failed) обратно в /link — B-app показывает
+их на странице устройства. Статус «received»-кадра нет (у протокола туннеля
+стадийный словарь фиксирован — новые стадии ломали бы старые сборки B).
+
 ### Совместная разработка между городами (Windows-машина ALSH у Redmi)
 
 Redmi (`DQ6TC64DY9PRBE4T`, 25078RA3EE) сидит на Windows-ПК `ALSH` по USB-adb

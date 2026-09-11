@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'dart_link.dart';
 import 'screencast.dart';
+import 'tunnel_proxy.dart';
 
 /// B-app (Controller) på Note 10.
 ///
@@ -80,6 +81,10 @@ class LinkBridge extends ChangeNotifier {
   DartLinkService? _dart;
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _appLinkSub;
+  // iOS/общий fallback: встроенный CONNECT-прокси на 0.0.0.0:8877 → /tunnel
+  // (туннель до шведского IP без системного прокси, см. tunnel_proxy.dart).
+  TunnelProxyService? _tunnelProxy;
+  String? proxyLanIp;
 
   String server = defaultServer;
   String pairId = defaultPairId;
@@ -245,15 +250,38 @@ class LinkBridge extends ChangeNotifier {
     // Misslyckat setProxy får aldrig stoppa navigeringen: enheter utan
     // WRITE_SECURE_SETTINGS (vanlig app) kastar här — tunneln via proxy är
     // helt enkelt otillgänglig, resten av appen ska leva vidare.
+    final dart = _dart;
+    if (dart != null) {
+      // Dart-путь: собственный CONNECT-прокси на 0.0.0.0:8877 (iOS и прочие без
+      // нативного слоя). Системный прокси не трогаем — на iOS его нет; трафик
+      // направляется вручную (настройки Wi-Fi → прокси <lan-ip>:8877).
+      try {
+        final proxy = _tunnelProxy ??= TunnelProxyService();
+        if (on) {
+          await proxy.start(server, pairId, token);
+          proxyLanIp = await TunnelProxyService.lanIp();
+          proxyOn = true;
+          proxyError = '';
+        } else {
+          await proxy.stop();
+          proxyOn = false;
+        }
+      } catch (e) {
+        proxyOn = false;
+        proxyError = 'Kunde inte starta proxy: $e';
+      }
+      proxyWanted = on;
+      await _saveSettings();
+      notifyListeners();
+      return;
+    }
     try {
       await _setProxy(on);
       proxyOn = on;
       proxyError = '';
     } catch (e) {
       proxyOn = false;
-      proxyError = Platform.isIOS
-          ? 'Global proxy stöds inte på iOS (tunnel via proxy är en Android-funktion): $e'
-          : 'Proxy kräver WRITE_SECURE_SETTINGS (adb: pm grant com.bankid.bus android.permission.WRITE_SECURE_SETTINGS): $e';
+      proxyError = 'Proxy kräver WRITE_SECURE_SETTINGS (adb: pm grant com.bankid.bus android.permission.WRITE_SECURE_SETTINGS): $e';
     }
     proxyWanted = on;
     await _saveSettings();
@@ -266,21 +294,55 @@ class LinkBridge extends ChangeNotifier {
   }
 
   Future<void> refreshProxyState() async {
+    final dart = _dart;
+    if (dart != null) {
+      proxyOn = _tunnelProxy?.active ?? false;
+      return;
+    }
     try {
       final value = await _control.invokeMethod<String>('getProxy');
       proxyOn = value != null && value.contains('$tunnelPort');
     } catch (_) {}
   }
 
-  /// Publik IP — via aktuell systemproxy, dvs. med tunnel ON är det den
-  /// valda A-app-enhetens adress.
-  Future<String> testPublicIp() async {
+  /// Отправка диплинка на выбранное A-app-устройство — «свой канал» B→A:
+  /// только по этому запросу A-app поднимает BankID. Нормализация URL — как
+  /// у перехвата bankid:// от Swedbank.
+  Future<bool> sendDeeplinkToDevice(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null) return false;
+    final url = _normalizeBankIdUrl(uri);
+    if (url.isEmpty) return false;
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendDeeplink(url, selectedDeviceId);
+      return true;
+    }
     try {
-      final request = await HttpClient()
+      await _ch.invokeMethod<void>('sendDeeplink', url);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Publik IP — через активный прокси (свой Dart-прокси или системный на
+  /// Android), dvs. med tunnel ON är det den valda A-app-enhetens adress.
+  Future<String> testPublicIp() async {
+    final dart = _dart;
+    final throughProxy = proxyOn && (dart != null ? (_tunnelProxy?.active ?? false) : true);
+    try {
+      final client = HttpClient();
+      if (dart != null && throughProxy) {
+        client.findProxy = (uri) => 'PROXY 127.0.0.1:$tunnelPort';
+      }
+      final request = await client
           .getUrl(Uri.parse('https://api.ipify.org?format=json'))
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 25));
       final response = await request.close();
       final body = await response.transform(utf8.decoder).join();
+      client.close();
       final ip = (jsonDecode(body) as Map<String, dynamic>)['ip'] as String? ?? '?';
       return 'Publik IP: $ip';
     } catch (e) {
@@ -412,6 +474,7 @@ class LinkBridge extends ChangeNotifier {
   @override
   void dispose() {
     _appLinkSub?.cancel();
+    unawaited(_tunnelProxy?.stop());
     unawaited(_dart?.dispose());
     super.dispose();
   }
@@ -644,6 +707,41 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
+  /// «Свой канал»: отправить bankid-диплинк на A-app вручную (перехват от
+  /// Swedbank — тот же путь автоматически; это ручной/тестовый ввод).
+  Future<void> _sendDeeplink() async {
+    final ctrl = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Skicka bankid-länk'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'bankid:///?autostarttoken=…'),
+          keyboardType: TextInputType.url,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Avbryt')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Skicka'),
+          ),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty || !mounted) return;
+    final ok = await client.sendDeeplinkToDevice(url);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? 'Länken skickad — enheten aktiverar BankID'
+              : 'Kunde inte skicka — kontrollera länken (bankid:///) och kanalen'),
+        ),
+      );
+    }
+  }
+
   /// Мягкая реанимация: переподключение сигналинга на устройстве (FCM → restart).
   Future<void> _restartService() async {
     setState(() => _busy = true);
@@ -729,19 +827,43 @@ class _DevicePageState extends State<DevicePage> {
                 onPressed: widget.device.online ? _toggleScreencast : null,
               ),
               const SizedBox(height: 12),
-              // Туннель «весь трафик через устройство» — Android-only (нужен
-              // глобальный прокси через WRITE_SECURE_SETTINGS); на iOS кнопку
-              // не показываем вовсе, чтобы не соблазнять мёртвой функцией.
-              if (!Platform.isIOS)
-                _bigButton(
-                  icon: client.proxyOn ? Icons.stop : Icons.vpn_key,
-                  label: client.proxyOn
-                      ? 'Tunnel påslagen (${client.tunnelStreams} strömmar) – stoppa'
-                      : 'Skicka all trafik via ${widget.device.displayName}',
-                  color: client.proxyOn ? Colors.green : null,
-                  onPressed: client.tunnelOnline || client.proxyOn ? _toggleTunnel : null,
+              // Туннель «весь трафик через устройство»: Android — нативный системный
+              // прокси; iOS/без нативного слоя — собственный CONNECT-прокси на
+              // 0.0.0.0:8877 (настройки Wi-Fi устройства → прокси <lan-ip>:8877).
+              _bigButton(
+                icon: client.proxyOn ? Icons.stop : Icons.vpn_key,
+                label: client.proxyOn
+                    ? 'Tunnel påslagen (${client.tunnelStreams} strömmar) – stoppa'
+                    : 'Skicka all trafik via ${widget.device.displayName}',
+                color: client.proxyOn ? Colors.green : null,
+                onPressed: client.tunnelOnline || client.proxyOn || Platform.isIOS ? _toggleTunnel : null,
+              ),
+              if (client.proxyOn && Platform.isIOS && (client.proxyLanIp?.isNotEmpty ?? false))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Card(
+                    color: Colors.blue.withOpacity(0.12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        'För att hela iPhone ska gå via enheten: Inställningar → Wi-Fi → (i) bredvid nätverket → '
+                        'Konfigurera proxy → Manuellt → Server ${client.proxyLanIp}, port 8877. '
+                        'Stäng av proxyn där när du är klar.',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ),
                 ),
-              if (!Platform.isIOS) const SizedBox(height: 12),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _sendDeeplink,
+                  icon: const Icon(Icons.login),
+                  label: const Text('Skicka bankid-länk (starta inloggning)'),
+                ),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
