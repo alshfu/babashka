@@ -7,10 +7,12 @@ import { log } from './log.js';
 
 const STATIC_ROOT = resolve(fileURLToPath(new URL('../static', import.meta.url)));
 const APK_RE = /^[\w.-]+\.apk$/;
+const APK_SHA_RE = /^[\w.-]+\.apk\.sha256$/;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.sha256': 'text/plain; charset=utf-8',
 };
 
 const json = (res, status, body) => {
@@ -227,7 +229,8 @@ function metrics(res, hub, journal) {
  */
 async function serveViewer(res, path) {
   const relative = normalize(path.replace(/^\/panel\/?/, '')).replace(/^(\.\.[/\\])+/, '');
-  if (relative !== 'lowlat.html' && relative !== 'lowlat.js' && !APK_RE.test(relative)) {
+  if (relative !== 'lowlat.html' && relative !== 'lowlat.js' &&
+      !APK_RE.test(relative) && !APK_SHA_RE.test(relative)) {
     return json(res, 404, { error: 'не найдено' });
   }
 
