@@ -39,9 +39,14 @@ export function createUpdateChannel({ config, hub }) {
   const agentAuth = (req) =>
     Boolean(config.agentToken) && req.headers['x-agent-token'] === config.agentToken;
 
+  // Токен скачивания: UPDATE_TOKEN сервера + дефолт Gradle ('pult-local-test') —
+  // сборки без env (macOS-разработка) вшивают его, иначе такой APK не может
+  // скачать обновление, которое его же и чинит (ловушка bootstrap).
+  const DOWNLOAD_TOKENS = new Set(
+    [config.updateToken, 'pult-local-test'].filter((t) => typeof t === 'string' && t.length > 0),
+  );
   const downloadAuth = (req, url) =>
-    agentAuth(req) ||
-    (Boolean(config.updateToken) && url.searchParams.get('token') === config.updateToken);
+    agentAuth(req) || DOWNLOAD_TOKENS.has(url.searchParams.get('token'));
 
   const manifestPath = (kind) => join(dir, `manifest-${kind}.json`);
 

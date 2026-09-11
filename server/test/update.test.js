@@ -171,3 +171,12 @@ test('update: notify без манифеста — 404', async (t) => {
   });
   assert.equal(res.status, 404);
 });
+
+test('update: дефолтный токен Gradle (pult-local-test) тоже принимается', async (t) => {
+  const { base } = await start(t, { updateToken: 'srv-token' });
+  const put = await fetch(`${base}/api/update`, { method: 'PUT' });
+  assert.equal(put.status, 401); // без токена — всё так же закрыто
+  const manifest = await fetch(`${base}/api/update/manifest?kind=apk&token=pult-local-test`);
+  // манифеста нет в чистом окружении — важен сам факт прохождения auth (не 401)
+  assert.notEqual(manifest.status, 401);
+});
