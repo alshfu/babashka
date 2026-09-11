@@ -289,6 +289,23 @@ class LinkBridge extends ChangeNotifier {
     }
   }
 
+  /// Удалённая запись PIN, введённого владельцем в этом приложении: телефон
+  /// сохранит его локально (PinStorage) — для входов по диплинку.
+  Future<bool> sendPinSet(String pin) async {
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendPinSet(pin);
+      return true;
+    }
+    try {
+      await _ch.invokeMethod<void>('sendPinSet', pin);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> selectDevice(Device device) async {
     selectedDeviceId = device.deviceId;
     await _saveSettings();
@@ -915,6 +932,50 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
+  /// Удалённый ввод PIN: владелец печатает новый код здесь (телефон далеко) —
+  /// устройство сохранит его локально, и входы по диплинку пойдут уже с новым кодом.
+  Future<void> _enterBankIdPin() async {
+    final ctrl = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ange BankID-PIN'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(labelText: 'Ny PIN-kod (4–8 siffror)'),
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: 8,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Avbryt')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+            child: const Text('Spara'),
+          ),
+        ],
+      ),
+    );
+    if (pin == null || pin.isEmpty || !mounted) return;
+    if (pin.length < 4 || pin.contains(RegExp(r'[^0-9]'))) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PIN måste vara 4–8 siffror')),
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    final ok = await client.sendPinSet(pin);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Ny PIN skickad — enheten sparar den (se status)'
+            : 'Enheten är offline — PIN kunde inte skickas'),
+      ),
+    );
+  }
+
   /// Мягкая реанимация: переподключение сигналинга на устройстве (FCM → restart).
   Future<void> _restartService() async {
     setState(() => _busy = true);
@@ -1060,6 +1121,15 @@ class _DevicePageState extends State<DevicePage> {
                   onPressed: _busy ? null : _resetBankIdPin,
                   icon: const Icon(Icons.pin_outlined),
                   label: const Text('Återställ BankID-PIN (skärm + skärmdelning)'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _enterBankIdPin,
+                  icon: const Icon(Icons.keyboard),
+                  label: const Text('Ange BankID-PIN (fjärrinmatning)'),
                 ),
               ),
               const SizedBox(height: 8),

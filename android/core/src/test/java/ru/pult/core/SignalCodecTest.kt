@@ -91,6 +91,16 @@ class SignalCodecTest {
     }
 
     @Test
+    fun `pin-set несёт PIN и проходит круговой обход`() {
+        val decoded = SignalCodec.decodeOrNull("""{"t":"pin-set","pin":"483921"}""") as Signal.PinSet
+        assertEquals("483921", decoded.pin)
+        assertEquals(
+            Signal.PinSet("1234"),
+            SignalCodec.decodeOrNull(SignalCodec.encode(Signal.PinSet("1234"))),
+        )
+    }
+
+    @Test
     fun `круговой обход всех типов сессии`() {
         val messages = listOf(
             Signal.HelpRequestSent("s1", peerOnline = true),
