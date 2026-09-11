@@ -70,8 +70,11 @@ class PultService : LifecycleService() {
     private var rotationWasUser: Int? = null
 
     // Дедупликация bankid-диплинков: повтор той же ссылки в течение 30 с не поднимаем.
+    // lastDeeplinkOk — флаг, что прошлый подъём РЕАЛЬНО удался: дедуплицировать
+    // провал нельзя (Б получит ложное «opened» и не перепробует вход).
     private var lastDeeplinkUrl: String? = null
     private var lastDeeplinkAt = 0L
+    private var lastDeeplinkOk = false
 
     // Мост на главный поток: колбэки datachannel и присутствия приходят с потоков libwebrtc.
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -698,10 +701,13 @@ class PultService : LifecycleService() {
      * full-screen intent-уведомление (путь «будильника», работает на MIUI) → shell
      * `am start` (только если startActivity упал, уведомление показать нельзя и
      * adbd-сессия уже жива — поднимать её из этого пути нельзя, см. onDeeplink).
-     * Итог — одной строкой: raise=direct|fsi|shell|failed.
+     * Итог — строка raise=direct|fsi|shell|failed:… — с деталями отказа: телефон далеко
+     * и логcat недоступен, единственная телеметрия — это err в deeplink-status.
      */
-    private fun raiseBankId(url: String): Boolean {
+    private fun raiseBankId(url: String): String {
         val watcher = ForegroundAppWatcher(this)
+        val km = getSystemService(android.app.KeyguardManager::class.java)
+        val pm = getSystemService(android.os.PowerManager::class.java)
         val direct = runCatching {
             startActivity(
                 Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
@@ -712,42 +718,51 @@ class PultService : LifecycleService() {
             // Без usage-статистики проверить нечем — верим прямому старту (стоковый Android).
             if (!watcher.hasPermission() || awaitBankIdForeground(watcher, DIRECT_VERIFY_MS)) {
                 android.util.Log.i(TAG_BANKID, "raise=direct")
-                return true
+                return "direct"
             }
         } else {
             android.util.Log.w(TAG_BANKID, "direct start threw: ${direct.exceptionOrNull()?.message}")
         }
         // Путь «будильника»: FSI-уведомление выводит activity поверх всего даже на MIUI.
         val nm = getSystemService(android.app.NotificationManager::class.java)
-        val canFsi = nm != null && nm.areNotificationsEnabled() &&
-            (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || nm.canUseFullScreenIntent())
+        val notifEnabled = nm?.areNotificationsEnabled() == true
+        val fsiAllowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            nm?.canUseFullScreenIntent() == true
+        val canFsi = nm != null && notifEnabled && fsiAllowed
         if (canFsi) {
             notify(Notifications.bankIdLaunch(this, url), Notifications.ID_BANKID_LAUNCH)
             // Проверить нечем (нет usage-статистики) — верим пути «будильника»:
             // уведомление гаснет по тапу (autoCancel) или через 2 минуты (timeoutAfter).
             if (!watcher.hasPermission()) {
                 android.util.Log.i(TAG_BANKID, "raise=fsi")
-                return true
+                return "fsi"
             }
             val ok = awaitBankIdForeground(watcher, FSI_VERIFY_MS)
             cancel(Notifications.ID_BANKID_LAUNCH)
             if (ok) {
                 android.util.Log.i(TAG_BANKID, "raise=fsi")
-                return true
+                return "fsi"
             }
         }
         // Последний резерв — shell (требует wireless debugging): только когда прямой
         // старт упал, уведомление показать нельзя и сессия adbd УЖЕ жива. Иначе
         // openDeeplink полез бы поднимать подключение (паринг, включение adb_wifi) —
         // а с ним BankID работать отказывается.
-        if (direct.isFailure && !canFsi && ru.pult.grandma.control.AdbShell.hasLiveSession()) {
+        val liveSession = ru.pult.grandma.control.AdbShell.hasLiveSession()
+        if (direct.isFailure && !canFsi && liveSession) {
             if (ru.pult.grandma.control.BankIdAgent.openDeeplink(url)) {
                 android.util.Log.i(TAG_BANKID, "raise=shell")
-                return true
+                return "shell"
             }
         }
-        android.util.Log.w(TAG_BANKID, "raise=failed")
-        return false
+        val detail = "direct=${if (direct.isSuccess) "no-fg" else "throw"};" +
+            "notif=$notifEnabled;fsi=$fsiAllowed;" +
+            "shell=$liveSession;" +
+            "locked=${km?.isDeviceLocked == true};" +
+            "screen=${pm?.isInteractive == true};" +
+            "usage=${watcher.hasPermission()}"
+        android.util.Log.w(TAG_BANKID, "raise=failed $detail")
+        return "failed:$detail"
     }
 
     /** Ждать, пока com.bankid.bus окажется на переднем плане (UsageStats, как в ForegroundAppWatcher). */
@@ -785,14 +800,17 @@ class PultService : LifecycleService() {
         }
         // Дедупликация: тот же URL в течение 30 с не поднимаем повторно — вторая
         // доставка сжигает autostart-token, и заказ умирает (наблюдалось на MIUI).
+        // Важно: дедупим ТОЛЬКО успешный подъём — повтор после отказа должен реально
+        // перепробовать пути (иначе Б врёт «opened» на провалившуюся попытку).
         val now = System.currentTimeMillis()
-        if (url == lastDeeplinkUrl && now - lastDeeplinkAt < DEEPLINK_DEDUPE_MS) {
+        if (url == lastDeeplinkUrl && now - lastDeeplinkAt < DEEPLINK_DEDUPE_MS && lastDeeplinkOk) {
             android.util.Log.i(TAG_BANKID, "raise=duplicate")
             client?.send(Signal.DeeplinkStatus(ok = true, stage = "opened"))
             return
         }
         lastDeeplinkUrl = url
         lastDeeplinkAt = now
+        lastDeeplinkOk = false
         // Вход инициирован шлюзом — режим REMOTE: автоматика BankID разрешена (BankIdMode).
         BankIdMode.onRemoteDeeplink()
         // Горячо обновлённый dex-модуль может перехватить обработку диплинка целиком;
@@ -846,10 +864,18 @@ class PultService : LifecycleService() {
             // startActivity выводит её наверх со СТАРЫМ экраном. Убиваем заранее.
             ru.pult.grandma.control.AdbShell.exec("am force-stop com.bankid.bus", 8_000)
             Thread.sleep(600)
-            if (!raiseBankId(url)) {
-                client?.send(Signal.DeeplinkStatus(ok = false, stage = "failed", err = "bankid-open-failed"))
+            val raise = raiseBankId(url)
+            if (raise.startsWith("failed")) {
+                lastDeeplinkOk = false // повтор той же ссылки должен РЕАЛЬНО перепробовать пути
+                client?.send(
+                    Signal.DeeplinkStatus(
+                        ok = false, stage = "failed",
+                        err = raise.removePrefix("failed:").take(120),
+                    ),
+                )
                 return@Thread
             }
+            lastDeeplinkOk = true
             client?.send(Signal.DeeplinkStatus(ok = true, stage = "opened"))
             // Автозавершение — только по УЖЕ живой shell-сессии: иначе ensureScrcpy
             // включил бы wireless debugging (паринг/коннект), и BankID встал бы снова.
