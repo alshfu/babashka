@@ -119,6 +119,12 @@ https://85.190.98.57.sslip.io:8445/panel/a-app.apk   (A-app, enhet i Sverige)
   PC över VPS: nav + tap verkade, kommandon utan token avvisades i loggen.
   Nya APK:er (A `3a7b1c0e…`, B `e6738c9a…`) installerade på Redmi/Note 10
   och uppladdade till `/panel/`.
+- **Flera B-appar per par (2026-09-11, commit `6632b0d`):** `/link` och
+  `/tunnel` tillåter nu flera samtidiga B-app-anslutningar på samma par
+  (telefon under handen + ägarens surfplatta). Tidigare var slottarna en per
+  par — två B-appar kastade ut varandra var ~20:e sekund, och styrning/
+  skärmdelning/tunnel «fungerade inte» på den ena enheten. Utökat på VPS:en;
+  verifierat att båda B-apparna håller anslutningen stabilt.
 - **Note 10 kör nya B-appen** (installerad 2026-09-10, byter ut gamla
   gateway-APK:n; inställningar och PIN:er behölls). **E2E-test av
   BankID-inlogg krävs innan Swedbank används** — se §7.
