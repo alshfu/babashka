@@ -14,6 +14,11 @@ import { log } from './log.js';
  *   app → S  {"t":"deeplink","url":"bankid:///…autostarttoken=…"}
  *   S → app  {"t":"deeplink-ack","delivered":true|false}    — квитанция маршрутизации
  *   S → app  {"t":"deeplink-status","ok":bool,"stage":"…","err":"…"} — итог с телефона
+ *
+ * На пару может быть подключено НЕСКОЛЬКО приложений шлюза одновременно (телефон
+ * под рукой + планшет хозяина): диплинк в телефон уходит по любому из них, статусы
+ * и update-status рассылаются всем. Раньше слот был один и два шлюза выбивали
+ * друг друга каждые ~20 с (постоянный reconnect, стыренные команды).
  */
 const MAX_URL = 512;
 
@@ -21,7 +26,7 @@ const isBankIdUrl = (url) =>
   typeof url === 'string' && url.length <= MAX_URL && url.startsWith('bankid:///');
 
 export function createLinkChannel({ config, hub }) {
-  const links = new Map();   // pairId → socket
+  const links = new Map();   // pairId → Set<socket>
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
@@ -36,10 +41,13 @@ export function createLinkChannel({ config, hub }) {
       return;
     }
 
-    const prev = links.get(pairId);
-    if (prev && prev.readyState === prev.OPEN) prev.close(4000, 'replaced');
-    links.set(pairId, socket);
-    log.info('link: connected', { pairId });
+    let set = links.get(pairId);
+    if (!set) {
+      set = new Set();
+      links.set(pairId, set);
+    }
+    set.add(socket);
+    log.info('link: connected', { pairId, clients: set.size });
 
     socket.on('message', (data) => {
       let msg;
@@ -63,20 +71,26 @@ export function createLinkChannel({ config, hub }) {
     });
 
     socket.on('close', () => {
-      if (links.get(pairId) === socket) links.delete(pairId);
+      const set2 = links.get(pairId);
+      if (set2) {
+        set2.delete(socket);
+        if (set2.size === 0) links.delete(pairId);
+      }
       log.info('link: disconnected', { pairId });
     });
     socket.on('error', (error) => log.warn(`link ws: ${error.message}`, { pairId }));
   });
 
-  /** Произвольное сообщение приложению пары. Молчит, если приложение офлайн. */
+  /** Произвольное сообщение всем приложениям пары. Молчит, если все офлайн. */
   function notify(pairId, obj) {
-    const socket = links.get(pairId);
-    if (!socket || socket.readyState !== socket.OPEN) return;
-    socket.send(JSON.stringify(obj));
+    const set = links.get(pairId);
+    if (!set) return;
+    for (const socket of set) {
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(obj));
+    }
   }
 
-  /** Статус подписания с телефона → в приложение. */
+  /** Статус подписания с телефона → во все подключённые приложения. */
   function notifyStatus(pairId, status) {
     notify(pairId, { t: 'deeplink-status', ...status });
   }
