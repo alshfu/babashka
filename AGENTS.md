@@ -75,6 +75,52 @@ Swedbank → tap «Logga in»
   app_process / LanAgent 47201 </dev/null >/sdcard/lanagent.log 2>&1 &'`.
 - `server/src/` — hub/tunnel/link; heartbeat на вс ех каналах; очередь deeplink для офлайн-grandma.
 
+### Реаниматор (удалённая перезагрузка A-app)
+
+`POST /api/reanimate` {pairId, action} (x-agent-token) → FCM data-push `{t:'reanimate', action}` →
+`PultMessagingService` → `Reanimate`: **restart** — мягкий переподключение сигналинга
+(`ACTION_REANIMATE_RESTART` → `PultService.reconnect()`); **reboot** — `svc power reboot`
+через shell: сначала как есть (LanAgent на loopback), не вышло — включается adb_wifi
+(`AdbShell.enableWirelessDebugging()`) и опрос adbd до 60 с. Работает, пока жив системный
+стек (FCM доставлен); полностью подвисшее железо software не спасти. Кнопки — страница
+устройства в B-app («Starta om tjänsten» / «Starta om enheten» с подтверждением).
+Банковский контур (BankIdAgent) не трогается; после ребута всё поднимается само
+(BootReceiver → PultService → adb_wifi=1).
+
+### Туннель «шведский IP» — архитектура под правило «Redmi далеко, устройства рядом»
+
+Единый выход в сеть с IP A-app (Redmi в Швеции) поверх `/tunnel`:
+- **SOCKS5-шлюз на VPS** (`scripts/tunnel-gateway.mjs`, systemd `pult-tunnel-gateway`,
+  слушает `127.0.0.1:11080` на VPS): сам является app-стороной туннеля, каждый
+  SOCKS-CONNECT = один streamId `/tunnel`. Это основной путь для ближних устройств —
+  iPhone, Mac, Windows-машина с IDE. Доступ: `ssh -L 11080:127.0.0.1:11080 administrator@<vps>`,
+  дальше браузер/IDE на `socks5h://127.0.0.1:11080` (DNS резолвится в Швеции).
+  Альтернатива доступа — Tailscale (на VPS уже `tailscaled`): привязать шлюз
+  к tailnet-IP и ходить напрямую.
+- **Нативный прокси B-app** (Android, `TunnelProxyNative` на 127.0.0.1:8877) — путь для
+  Note 10, оставлен без изменений. На iOS системного прокси нет (нужен Network
+  Extension, заблокирован до починки Apple ID) — iPhone ходит через VPS-шлюз.
+
+### Совместная разработка между городами (Windows-машина ALSH у Redmi)
+
+Redmi (`DQ6TC64DY9PRBE4T`, 25078RA3EE) сидит на Windows-ПК `ALSH` по USB-adb
+(рядом же Note10 `R58M9167C4H`). Все машины в одном tailnet (`alshfu@`):
+macbook-prom4max (Mac) · alsh/100.102.35.68 (Windows) · vps-xray (VPS).
+
+Доступ к ALSH:
+| Способ | Адрес | Логин |
+|---|---|---|
+| SSH через VPS | `ssh -p 12222 Administrator@85.190.98.57` | Administrator |
+| RDP через VPS | `85.190.98.57:13389` | Administrator |
+| SSH по Tailscale | `100.102.35.68:22` | Administrator |
+| RDP по Tailscale | `100.102.35.68:3389` | Administrator |
+
+adb на ALSH: `C:\Users\Administrator\IdeaProjects\babashka\tools\platform-tools\adb.exe`
+(в PATH нет; репозиторий — `C:\Users\Administrator\IdeaProjects\babashka`, IDE — IntelliJ IDEA
+2026.2.2, JetBrains-аккаунт общий с Mac). Прямой сценарий: `ssh Administrator@100.102.35.68`
+→ `adb -s DQ6TC64DY9PRBE4T shell …`. Реаниматор поднимает PultService без рук: пока процесс
+жив, но сервис мёртв, телефон «офлайн» для сервера, но отвечает по USB.
+
 ### MIUI-разрешения grandma (сбрасываются при pm install -r — перевыдать!)
 
 ```

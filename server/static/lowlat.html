@@ -17,6 +17,15 @@
     button { font: inherit; color: #eceff4; background: #2b303a; border: 1px solid #2c313a; border-radius: 10px; padding: 0.5rem 1rem; cursor: pointer; }
     button:hover { background: #343a46; }
   </style>
+  <script>
+    // Полноэкранный режим (встроенный показ в B-app): прячем шапку и кнопки — только экран.
+    if (new URLSearchParams(location.search).has('fs')) {
+      addEventListener('DOMContentLoaded', () => {
+        document.querySelector('header').style.display = 'none';
+        document.querySelector('.keys').style.display = 'none';
+      });
+    }
+  </script>
 </head>
 <body>
   <header>
