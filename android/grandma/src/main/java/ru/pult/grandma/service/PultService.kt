@@ -114,6 +114,10 @@ class PultService : LifecycleService() {
         }
         // Периодическая проверка обновлений (apk/dex) — дополняет мгновенный пуш.
         UpdateCheckWorker.schedule(this)
+        // Full-screen intent подъёма BankID требует POST_NOTIFICATIONS (Android 13+):
+        // без разрешения FSI молча пропускается и диплинк падает с bankid-open-failed
+        // (телефон спит запертым — других путей подъёма в этот момент нет).
+        maybeAskNotificationPermission()
 
         updates = UpdateManager(this)
         // QR с экрана BankID (удалённый вход) — помощнику по control-каналу.
@@ -133,6 +137,27 @@ class PultService : LifecycleService() {
         }
 
         pairStore.load()?.let(::connect)
+    }
+
+    /**
+     * Разрешение на уведомления нужно для full-screen intent подъёма BankID (Android 13+).
+     * Просим редко: максимум раз в сутки, пока не выдано. Отказ — не ошибка: просто
+     * FSI-путь остаётся недоступен, как и был.
+     */
+    private fun maybeAskNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED) return
+        val prefs = PultApp.prefs(this)
+        val lastAsk = prefs.getLong("notif_perm_asked_at", 0L)
+        if (System.currentTimeMillis() - lastAsk < 24 * 60 * 60 * 1000L) return
+        prefs.edit().putLong("notif_perm_asked_at", System.currentTimeMillis()).apply()
+        runCatching {
+            startActivity(
+                Intent(this, ru.pult.grandma.ui.PermissionActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -792,6 +817,12 @@ class PultService : LifecycleService() {
         // переднего плана спит, а shell-путь идёт через TCP-сокет агента — сеть и сон
         // на главном потоке запрещены.
         Thread {
+            // Телефон далеко и почти всегда спит запертым (enforceLocked): keyguard
+            // блокирует прямой старт BankID, а FSI-путь требует разрешения на уведомления.
+            // Будим и отпираем заранее — best-effort: без a11y/PIN сработает только
+            // вейклок, но и он нужен (экран погашен = direct start молча мимо).
+            ru.pult.grandma.control.ScreenUnlock.unlock(this)
+            Thread.sleep(3_000)
             // BankID отказывается работать при включённой беспроводной отладке
             // («Trådlös felsökning») — гасим её ДО подъёма. Неудача записи не блокирует.
             // На MIUI это убивает adbd-листенер и вместе с ним живую shell-сессию,
