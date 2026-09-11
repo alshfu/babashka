@@ -10,6 +10,24 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    // Маркерные POM плагинов (…​.gradle.plugin) у AGP лежат на dl.google.com, у Kotlin —
+    // на портале, и вместе с основным артефактом они не кэшируются: при недоступности
+    // этих хостов сборка падает, хотя сами плагины в кэше есть. Ссылаемся на модули
+    // напрямую, маркеры не нужны.
+    resolutionStrategy {
+        eachPlugin {
+            val id = requested.id.id
+            when (id) {
+                "com.android.application", "com.android.library" ->
+                    useModule("com.android.tools.build:gradle:${requested.version}")
+                "org.jetbrains.kotlin.android" ->
+                    useModule("org.jetbrains.kotlin:kotlin-gradle-plugin:${requested.version}")
+                "org.jetbrains.kotlin.plugin.serialization" ->
+                    useModule("org.jetbrains.kotlin:kotlin-serialization:${requested.version}")
+                else -> Unit
+            }
+        }
+    }
 }
 
 dependencyResolutionManagement {

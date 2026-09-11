@@ -32,6 +32,12 @@
         <activity
             android:name=".lowlat.LowLatActivity"
             android:exported="true" />
+        <!-- Невидимка снятия блокировки (ScreenUnlock): поднять экран поверх keyguard и уйти. -->
+        <activity
+            android:name=".ui.UnlockActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <service
             android:name=".lowlat.LowLatService"
             android:exported="false"

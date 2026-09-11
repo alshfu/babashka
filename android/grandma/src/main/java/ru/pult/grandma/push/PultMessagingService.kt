@@ -5,6 +5,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import ru.pult.grandma.PultApp
 import ru.pult.grandma.service.PultService
+import ru.pult.grandma.service.Reanimate
 import ru.pult.grandma.service.ServiceHeartbeat
 
 /**
@@ -30,6 +31,15 @@ class PultMessagingService : FirebaseMessagingService() {
         // означает «внук зовёт», а запрос помощи придёт уже по сигналингу.
         ServiceHeartbeat.Deaths.markAlive(this, "fcm-wake")
         PultService.start(this)
+        // Команды реанимации (server → POST /api/reanimate → FCM data-push):
+        // restart — мягкий перезапуск сигналинга; reboot — перезагрузка устройства.
+        // Любой другой/пустой action — просто wake (сервис уже поднят выше).
+        if (message.data["t"] == "reanimate") {
+            when (message.data["action"]) {
+                "restart" -> Reanimate.restart(this)
+                "reboot" -> Reanimate.reboot(this)
+            }
+        }
     }
 
     companion object {

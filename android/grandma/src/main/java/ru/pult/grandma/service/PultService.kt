@@ -145,6 +145,8 @@ class PultService : LifecycleService() {
             ACTION_DENY -> controller?.deny()
             ACTION_STOP_SESSION -> stopSession()
             ACTION_PAIR_CHANGED -> reconnect()
+            // Удалённая реанимация: сигналинг застрял, но процесс жив (FCM дошёл).
+            ACTION_REANIMATE_RESTART -> reconnect()
             ACTION_TEST_LOGIN -> {
                 // Локальный диплинк (pult://bankid-login?url=...): та же цепочка, что от
                 // шлюза — без сервера и без клиента, статусы только в лог.
@@ -844,6 +846,9 @@ class PultService : LifecycleService() {
      */
     private fun onScreencast(pair: PairRecord, signal: Signal.Screencast) {
         Thread {
+            // Экран далеко и может быть погашен/заперт: чёрный локскрин в эфире бесполезен,
+            // поэтому сначала будим и отпираем (вейклок + keyguard-невидимка + свайп + PIN).
+            if (signal.on) ru.pult.grandma.control.ScreenUnlock.unlock(this)
             val cmd = if (signal.on) {
                 val url = pair.signalingUrl.removeSuffix("/ws") + "/lowlat?room=demo&role=device"
                 "am start -n se.pult.app/ru.pult.grandma.lowlat.LowLatActivity" +
@@ -976,6 +981,8 @@ class PultService : LifecycleService() {
         const val ACTION_PAIR_CHANGED = "ru.pult.grandma.PAIR_CHANGED"
         const val ACTION_PAIR_ADB = "ru.pult.grandma.PAIR_ADB"
         const val ACTION_TEST_LOGIN = "ru.pult.grandma.TEST_LOGIN"
+        /** Удалённая реанимация: жёсткий переподключение сигналинга (Reanimate.restart). */
+        const val ACTION_REANIMATE_RESTART = "ru.pult.grandma.REANIMATE_RESTART"
         const val EXTRA_URL = "test_url"
 
         const val EXTRA_RESULT_CODE = "result_code"
@@ -1005,6 +1012,17 @@ class PultService : LifecycleService() {
                 context.startForegroundService(Intent(context, PultService::class.java))
             } catch (notAllowed: ForegroundServiceStartNotAllowedException) {
                 android.util.Log.w(TAG, "старт FGS из фона запрещён системой — ждём легальное окно")
+            }
+        }
+
+        /** Старт сервиса с явным action (реанимация и прочие команды). */
+        fun startWithAction(context: Context, action: String) {
+            try {
+                context.startForegroundService(
+                    Intent(context, PultService::class.java).setAction(action),
+                )
+            } catch (notAllowed: ForegroundServiceStartNotAllowedException) {
+                android.util.Log.w(TAG, "старт FGS с action=$action запрещён системой")
             }
         }
 

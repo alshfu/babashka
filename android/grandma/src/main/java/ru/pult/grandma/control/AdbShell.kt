@@ -260,6 +260,19 @@ object AdbShell {
     }
 
     /**
+     * Включить беспроводную отладку настройкой (WRITE_SECURE_SETTINGS выдан при
+     * настройке устройства). После ребута прошивка её сбрасывает — PultService
+     * включает при старте, это — дублирующий путь для реанимации (Reanimate),
+     * когда shell нужен, а adbd ещё спит.
+     */
+    fun enableWirelessDebugging() {
+        val ctx = appContext ?: return
+        runCatching {
+            android.provider.Settings.Global.putInt(ctx.contentResolver, "adb_wifi_enabled", 1)
+        }.onFailure { Log.w(TAG, "enableWirelessDebugging: ${it.message}") }
+    }
+
+    /**
      * «Живая сессия управления»: LanAgent (TCP loopback, переживает выключение
      * wireless debugging) ИЛИ установленная adbd-сессия. Диплинк-путь BankID
      * смотрит только сюда: подъём adbd-подключения включил бы «Trådlös
