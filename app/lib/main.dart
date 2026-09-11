@@ -184,7 +184,15 @@ class LinkBridge extends ChangeNotifier {
   }
 
   Future<void> toggleProxy(bool on) async {
-    await _setProxy(on);
+    // Misslyckat setProxy får aldrig stoppa navigeringen: enheter utan
+    // WRITE_SECURE_SETTINGS (vanlig app) kastar här — tunneln via proxy är
+    // helt enkelt otillgänglig, resten av appen ska leva vidare.
+    try {
+      await _setProxy(on);
+      proxyOn = on;
+    } catch (_) {
+      proxyOn = false;
+    }
     proxyWanted = on;
     await _saveSettings();
     notifyListeners();
