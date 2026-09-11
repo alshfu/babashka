@@ -4,7 +4,6 @@ import {
   SESSION_STATE,
   checkRoute,
   parseMessage,
-  peerRole,
   relayPayload,
   validateHello,
 } from './protocol.js';
@@ -20,6 +19,15 @@ const HOUR_MS = 60 * 60 * 1000;
  * Сервер не может ни подслушать помощь, ни выдать согласие за бабушку — он только
  * доставляет сообщения тем, кому они адресованы (docs/architecture.md §4).
  */
+/**
+ * Слот присутствия в паре. Бабушка одна на пару (ключ 'grandma'), помощников
+ * может быть НЕСКОЛЬКО — по одному на deviceId (телефон под рукой + планшет
+ * хозяина + веб-панель): тестирование идёт с нескольких устройств одновременно,
+ * вытеснять их друг друга не должны. Тот же deviceId = тот же слот (реконнект
+ * приложения с прежним вытеснением, см. handleHello).
+ */
+const slotKey = (role, deviceId) => (role === 'grandma' ? 'grandma' : `helper:${deviceId}`);
+
 export class Hub {
   #config;
   #journal;
@@ -62,36 +70,40 @@ export class Hub {
     this.#registerDevice(conn);
     this.#deviceConns.set(deviceConnKey(message.pairId, message.deviceId), conn);
 
-    const previous = pair.sockets.get(conn.role);
+    const slot = slotKey(conn.role, conn.deviceId);
+    const previous = pair.sockets.get(slot);
     if (previous && previous !== conn) {
       // Смена сети у бабушки не должна оставлять «призрака», который держит присутствие.
       previous.send({ t: 'error', code: ERROR.REPLACED, message: 'connection replaced by a newer one' });
       previous.close();
-      pair.sockets.delete(conn.role);
+      pair.sockets.delete(slot);
       // Тот же участник переподключился, пока шла сессия (внук закрыл вкладку и открыл
       // заново — браузер держит старый сокет ещё несколько секунд). WebRTC старого сокета
       // мёртв, поэтому сессию надо закрыть и уведомить вторую сторону: иначе телефон
       // остаётся в старой сессии (висит рамка), а новый сокет упирается в wrong-state.
       if (pair.session) {
-        const other = pair.sockets.get(peerRole(conn.role));
-        if (other) other.send({ t: 'session-end', sessionId: pair.session.id, reason: END_REASON.PEER_LOST });
+        this.#broadcast(pair, { t: 'session-end', sessionId: pair.session.id, reason: END_REASON.PEER_LOST });
         this.#endSession(pair, END_REASON.PEER_LOST);
       }
     }
-    pair.sockets.set(conn.role, conn);
+    pair.sockets.set(slot, conn);
 
     if (message.journalTokenHash) this.#journal.registerPair(pair.pairId, message.journalTokenHash);
 
-    const peer = pair.sockets.get(peerRole(conn.role));
+    // Пиры: у помощника — бабушка; у бабушки — любой из помощников.
+    const peers = [...pair.sockets.values()].filter((s) => s !== conn);
+    const primaryPeer = conn.role === 'grandma'
+      ? peers.find((s) => s.role === 'helper')
+      : peers.find((s) => s.role === 'grandma');
     conn.send({
       t: 'hello-ok',
       serverTime: this.#now(),
-      peerOnline: Boolean(peer),
+      peerOnline: Boolean(primaryPeer),
       iceServers: this.iceServers(pair.pairId),
-      ...(peer?.label !== undefined ? { peerLabel: peer.label } : {}),
-      ...(peer?.model !== undefined ? { peerModel: peer.model } : {}),
+      ...(primaryPeer?.label !== undefined ? { peerLabel: primaryPeer.label } : {}),
+      ...(primaryPeer?.model !== undefined ? { peerModel: primaryPeer.model } : {}),
     });
-    if (peer) {
+    for (const peer of peers) {
       peer.send({
         t: 'peer-state',
         online: true,
@@ -194,23 +206,30 @@ export class Hub {
     if (!conn.joined) return;
     const pair = this.#pairs.get(conn.pairId);
     if (!pair) return;
-    if (pair.sockets.get(conn.role) !== conn) return; // уже вытеснен новым сокетом
+    const slot = slotKey(conn.role, conn.deviceId);
+    if (pair.sockets.get(slot) !== conn) return; // уже вытеснен новым сокетом
 
-    const device = this.#devices.get(deviceKey(conn.pairId, conn.role));
+    const device = this.#devices.get(deviceKey(conn.pairId, conn.role, conn.deviceId));
     if (device) {
       device.online = false;
       device.lastSeen = this.#now();
     }
     this.#deviceConns.delete(deviceConnKey(conn.pairId, conn.deviceId));
 
-    pair.sockets.delete(conn.role);
-    const peer = pair.sockets.get(peerRole(conn.role));
-    if (peer) peer.send({ t: 'peer-state', online: false });
+    pair.sockets.delete(slot);
+    // peer-state «офлайн» шлём только тем, для кого это правда: бабушке — когда ушёл
+    // ПОСЛЕДНИЙ помощник; помощникам — когда ушла бабушка.
+    const helpersLeft = [...pair.sockets.values()].some((s) => s.role === 'helper');
+    for (const socket of pair.sockets.values()) {
+      if (conn.role === 'grandma' && socket.role !== 'helper') continue;
+      if (conn.role === 'helper' && (socket.role !== 'grandma' || helpersLeft)) continue;
+      socket.send({ t: 'peer-state', online: false });
+    }
 
     if (pair.session) {
       // The remaining side MUST be told the session is over, otherwise the phone stays
       // in CONNECTED, keeps capturing, and ignores every later help-request (state != IDLE).
-      if (peer) peer.send({ t: 'session-end', sessionId: pair.session.id, reason: END_REASON.PEER_LOST });
+      this.#broadcast(pair, { t: 'session-end', sessionId: pair.session.id, reason: END_REASON.PEER_LOST });
       this.#endSession(pair, END_REASON.PEER_LOST);
     }
     // Не выбрасываем пару, пока висит неотданный отзыв: его надо доставить бабушке.
@@ -260,7 +279,8 @@ export class Hub {
     }
     if (message.t === 'revoke-ack') {
       pair.pendingRevoke = null;
-      this.#relay(pair, conn, message, undefined);
+      // Отзыв мог прислать любой из помощников — подтверждение получают все.
+      this.#broadcast(pair, message);
       return;
     }
 
@@ -306,7 +326,15 @@ export class Hub {
   }
 
   #relay(pair, conn, message, sessionId) {
-    const peer = pair.sockets.get(peerRole(conn.role));
+    // Помощник всегда говорит с единственной бабушкой; ответы бабушки — тому помощнику,
+    // который открыл текущую сессию (вне сессии — любому живому помощнику).
+    let peer = null;
+    if (conn.role === 'grandma') {
+      if (sessionId && pair.session?.requestedByConn) peer = pair.session.requestedByConn;
+      if (!peer) peer = [...pair.sockets.values()].find((s) => s.role === 'helper');
+    } else {
+      peer = pair.sockets.get('grandma');
+    }
     if (!peer) {
       conn.send({ t: 'error', code: ERROR.PEER_OFFLINE, message: 'the other side is offline' });
       return;
@@ -340,6 +368,7 @@ export class Hub {
       id: newId(),
       state: SESSION_STATE.AWAITING_CONSENT,
       requestedBy: conn.role,
+      requestedByConn: conn,
       requestedAt: now,
       consentedAt: null,
       screenShown: false,
@@ -405,6 +434,7 @@ export class Hub {
     const session = pair.session;
     if (!session) return;
     clearTimeout(session.timer);
+    session.requestedByConn = null; // не держим сокет помощника ссылкой после сессии
     pair.session = null;
 
     this.#journal.append({
@@ -496,7 +526,7 @@ export class Hub {
   }
 
   #registerDevice(conn) {
-    this.#devices.set(deviceKey(conn.pairId, conn.role), {
+    this.#devices.set(deviceKey(conn.pairId, conn.role, conn.deviceId), {
       pairId: conn.pairId,
       role: conn.role,
       deviceId: conn.deviceId,
@@ -541,7 +571,8 @@ export class Hub {
     const pair = this.#pairs.get(pairId);
     if (!pair) return null;
     return {
-      roles: [...pair.sockets.keys()],
+      // Слоты helper:<deviceId> сворачиваем обратно в роли — внешний вид прежний.
+      roles: [...pair.sockets.keys()].map((key) => (key === 'grandma' ? 'grandma' : 'helper')),
       session: pair.session ? { id: pair.session.id, state: pair.session.state } : null,
       requestsLastHour: pair.requestTimes.length,
       consecutiveNoAnswer: pair.consecutiveNoAnswer,
@@ -584,7 +615,7 @@ export class Hub {
   }
 }
 
-const deviceKey = (pairId, role) => `${pairId}${role}`;
+const deviceKey = (pairId, role, deviceId) => `${pairId}:${role}:${deviceId}`;
 
 const deviceConnKey = (pairId, deviceId) => `${pairId}:${deviceId}`;
 

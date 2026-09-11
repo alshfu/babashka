@@ -212,6 +212,44 @@ describe('сигналинг', () => {
     await second.close();
   });
 
+  test('несколько помощников с разными deviceId сосуществуют (тестирование с нескольких устройств)', async (t) => {
+    const id = pairId('multi-helper');
+    const grandma = await TestClient.connect(ctx.url);
+    await grandma.hello({ pairId: id, role: 'grandma' });
+    const phone = await TestClient.connect(ctx.url);
+    await phone.hello({ pairId: id, role: 'helper', deviceId: 'dev-phone' });
+    const tablet = await TestClient.connect(ctx.url);
+    const ok = await tablet.hello({ pairId: id, role: 'helper', deviceId: 'dev-tablet' });
+
+    // Второй помощник НЕ вытесняет первого, бабушка онлайн для обоих.
+    assert.equal(ok.peerOnline, true);
+    assert.deepEqual(ctx.app.hub.inspect(id).roles.sort(), ['grandma', 'helper', 'helper']);
+
+    // Сессия от первого помощника; согласие бабушки уходит именно ему, второй не получает.
+    phone.send({ t: 'help-request' });
+    await phone.next('help-request-sent');
+    await grandma.next('help-request');
+    grandma.send({ t: 'consent-granted', sessionId: ctx.app.hub.inspect(id).session.id });
+    await phone.next('consent-granted');
+    const leaked = await tablet.silentFor(150);
+    assert.equal(leaked.some((m) => m.t === 'consent-granted' || m.t === 'session-end'), false);
+
+    // Второй помощник во время чужой сессии получает wrong-state, а не рвёт чужую сессию.
+    tablet.send({ t: 'help-request' });
+    const busy = await tablet.next('error');
+    assert.equal(busy.code, 'wrong-state');
+
+    // Уход последнего помощника сообщает бабушке «офлайн» ровно один раз.
+    await grandma.next('peer-state'); // online:true при подключении phone
+    await grandma.next('peer-state'); // online:true при подключении tablet
+    await phone.close();
+    await tablet.close();
+    const offline = await grandma.next('peer-state');
+    assert.equal(offline.online, false);
+
+    await grandma.close();
+  });
+
   test('запрос ждёт бабушку, которая подключилась позже (сценарий «телефон спал»)', async () => {
     const id = pairId('wake');
     const helper = await TestClient.connect(ctx.url);
