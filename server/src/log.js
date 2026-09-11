@@ -14,6 +14,9 @@ const SAFE_FIELDS = new Set([
   'room', 'size', 'buffered', 'dropped',
   // Канал обновлений: вид артефакта (apk|dex) — перечисление, не контент.
   'kind',
+  // Итог диплинка с телефона: stage — служебное перечисление (opened|signed|failed),
+  // err — уже обрезан сервером до 128 символов. Контента сессии здесь нет.
+  'ok', 'stage', 'err',
   // BankID-диплинк (одноразовый autostart-token) — нужен для доставки через shell.
   'url',
 ]);
