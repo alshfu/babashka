@@ -271,6 +271,24 @@ class LinkBridge extends ChangeNotifier {
     }
   }
 
+  /// Кнопка «сброс PIN BankID»: на далёком телефоне поднимется экран ввода PIN
+  /// (+ трансляция экрана, чтобы оператор видел процесс). Вводит человек у телефона;
+  /// итог — событие статуса stage=pin-saved|pin-cancelled.
+  Future<bool> sendPinSetup() async {
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendPinSetup();
+      return true;
+    }
+    try {
+      await _ch.invokeMethod<void>('sendPinSetup');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> selectDevice(Device device) async {
     selectedDeviceId = device.deviceId;
     await _saveSettings();
@@ -880,6 +898,23 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
+  /// Сброс BankID-PIN на далёком устройстве: телефон откроет экран ввода PIN и
+  /// включит skärmdelning — новый код вводит человек у телефона (например, efter
+  /// att ha bytt PIN i BankID). Итог виден i status (stage=pin-saved|pin-cancelled).
+  Future<void> _resetBankIdPin() async {
+    setState(() => _busy = true);
+    final ok = await client.sendPinSetup();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'PIN-skärmen öppnas på enheten — skärmdelning startar'
+            : 'Enheten är offline — PIN-skärmen kan inte öppnas'),
+      ),
+    );
+  }
+
   /// Мягкая реанимация: переподключение сигналинга на устройстве (FCM → restart).
   Future<void> _restartService() async {
     setState(() => _busy = true);
@@ -1016,6 +1051,15 @@ class _DevicePageState extends State<DevicePage> {
                   onPressed: _busy ? null : _sendDeeplink,
                   icon: const Icon(Icons.login),
                   label: const Text('Skicka bankid-länk (starta inloggning)'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _resetBankIdPin,
+                  icon: const Icon(Icons.pin_outlined),
+                  label: const Text('Återställ BankID-PIN (skärm + skärmdelning)'),
                 ),
               ),
               const SizedBox(height: 8),

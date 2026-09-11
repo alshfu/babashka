@@ -253,6 +253,7 @@ class PultService : LifecycleService() {
                     is Signal.Revoke -> onRevoke(pair, signal)
                     is Signal.Deeplink -> onDeeplink(client, signal)
                     is Signal.Screencast -> onScreencast(pair, signal)
+                    is Signal.PinSetup -> onPinSetup(client)
                     is Signal.UpdateAvailable -> updates.onPush(signal, pair.signalingUrl) { client.send(it) }
                     else -> session.handle(signal)
                 }
@@ -930,6 +931,33 @@ class PultService : LifecycleService() {
             }
             val (ok, out) = ru.pult.grandma.control.BankIdAgent.shell(cmd)
             android.util.Log.i("PultControl", "screencast on=${signal.on} ok=$ok ${out.take(100)}")
+        }.start()
+    }
+
+    /**
+     * Сброс BankID-PIN по кнопке из приложения шлюза (канал /link, сигнал pin-setup).
+     * PIN мог смениться в самом BankID — тогда автоввод входа старым кодом бесполезен,
+     * и человеку у далёкого телефона нужно ввести новый. Порядок: будим/отпираем экран,
+     * включаем lowlat-трансляцию (оператор видит ввод), показываем PIN-экран. Сохранение
+     * — внутри BankIdPinActivity (PinStorage). Итог уходит в /link как deeplink-status:
+     * stage=pin-saved|pin-cancelled.
+     */
+    private fun onPinSetup(client: SignalingClient) {
+        Thread {
+            runCatching { ru.pult.grandma.control.ScreenUnlock.unlock(this) }
+            Thread.sleep(2_500)
+            // Трансляция — тот же путь, что по кнопке «Dela skärm» в B-app.
+            runCatching { pairStore.load()?.let { onScreencast(it, Signal.Screencast(on = true)) } }
+            val pin = ru.pult.grandma.ui.BankIdPinActivity.requestPin(this)
+            android.util.Log.i("PultControl", "pin-setup result=${if (pin != null) "saved" else "cancelled/timeout"}")
+            runCatching {
+                client.send(
+                    Signal.DeeplinkStatus(
+                        ok = !pin.isNullOrEmpty(),
+                        stage = if (pin != null) "pin-saved" else "pin-cancelled",
+                    ),
+                )
+            }
         }.start()
     }
 

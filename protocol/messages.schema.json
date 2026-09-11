@@ -293,13 +293,18 @@
     },
     "deeplink-status": {
       "required": ["t", "ok", "stage"],
-      "description": "Телефон бабушки → приложение (через сервер): итог подписания. stage: opened | signing | signed | failed.",
+      "description": "Телефон бабушки → приложение (через сервер): итог подписания. stage: opened | signing | signed | failed. Переиспользуется и для сброса PIN (stage: pin-saved | pin-cancelled).",
       "properties": {
         "t": { "const": "deeplink-status" },
         "ok": { "type": "boolean" },
         "stage": { "type": "string", "maxLength": 32 },
         "err": { "type": "string", "maxLength": 128 }
       }
+    },
+    "pin-setup": {
+      "required": ["t"],
+      "description": "Приложение → телефон бабушки: показать экран ввода BankID-PIN (+ включить skärmdelning). Вводит человек у телефона (сброс/смена PIN); итог — deeplink-status со stage=pin-saved|pin-cancelled.",
+      "properties": { "t": { "const": "pin-setup" } }
     },
     "update-status": {
       "required": ["t", "pairId", "kind", "version", "ok", "at"],

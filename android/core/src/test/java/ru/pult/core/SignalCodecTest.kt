@@ -85,6 +85,12 @@ class SignalCodecTest {
     }
 
     @Test
+    fun `pin-setup от сервера разбирается и кодируется`() {
+        assertEquals(Signal.PinSetup, SignalCodec.decodeOrNull("""{"t":"pin-setup"}"""))
+        assertEquals(Signal.PinSetup, SignalCodec.decodeOrNull(SignalCodec.encode(Signal.PinSetup)))
+    }
+
+    @Test
     fun `круговой обход всех типов сессии`() {
         val messages = listOf(
             Signal.HelpRequestSent("s1", peerOnline = true),

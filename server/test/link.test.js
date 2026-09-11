@@ -57,6 +57,28 @@ test('/link: телефон офлайн — delivered:false, приложени
   assert.equal(ack.delivered, false);
 });
 
+test('/link: pin-setup доезжает до телефона бабушки, итог возвращается приложению', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('pin');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  app.send({ t: 'pin-setup' });
+
+  const ack = await app.next('deeplink-ack');
+  assert.equal(ack.delivered, true);
+
+  const onPhone = await grandma.next('pin-setup');
+  assert.equal(onPhone.t, 'pin-setup');
+
+  // Итог ввода PIN бабушка шлёт тем же deeplink-status (stage=pin-saved|pin-cancelled).
+  grandma.send({ t: 'deeplink-status', ok: true, stage: 'pin-saved', err: '' });
+  const status = await app.next('deeplink-status');
+  assert.deepEqual({ ok: status.ok, stage: status.stage }, { ok: true, stage: 'pin-saved' });
+});
+
 test('/link: не-bankid URL не маршрутизируется', async (t) => {
   const { port, url } = await start(t);
   const pair = pairId('d');

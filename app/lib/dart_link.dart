@@ -81,6 +81,13 @@ class DartLinkService {
     if (online) _send(jsonEncode({'t': 'screencast', 'on': on}));
   }
 
+  /// Сброс BankID-PIN на выбранном A-app: телефон покажет экран ввода PIN
+  /// (вводит человек у телефона) и включит трансляцию. Итог придёт событием
+  /// deeplink-status со stage=pin-saved|pin-cancelled.
+  void sendPinSetup() {
+    if (online) _send(jsonEncode({'t': 'pin-setup'}));
+  }
+
   void clearStatus() {
     lastStatusRaw = '';
   }

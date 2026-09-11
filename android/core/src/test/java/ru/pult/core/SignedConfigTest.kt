@@ -12,13 +12,13 @@ import ru.pult.core.net.SignedConfig
 class SignedConfigTest {
 
     // Публичный ключ, запиненный в приложении (SPKI DER, base64).
-    private val pub = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEE4lMaiAnXcawkI07IZt2GR4EWb8rFj8Sv" +
-        "QWKFFjBv+5rNDFe4jTff2bSEhPzcJLQIGRWn+ZfG6fV+IaNFoZAeQ=="
+    // Вектор перегенерирован 2026-09-12: прошлый конверт был подписан на старый
+    // адрес сервера (89-127-235-17), приватный ключ тест-вектора утерян.
+    private val pub = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENzuxriNTq2aZgnCchqHbK136R3jsEJjgjwAvPo7ysV6JinEynDfUQvws84knLlNi5ZE5rWbbEbRd7R+u4otxHA=="
 
     // Конверт: payload = base64 манифеста, sig = base64 подписи по его байтам.
-    private val payload = "eyJ2ZXJzaW9uIjoxLCJlbmRwb2ludHMiOlsid3NzOi8vODktMTI3LTIzNS0xNy5zc2xpc" +
-        "C5pby93cyIsIndzczovL2JhY2t1cC5leGFtcGxlLmNvbS93cyJdLCJ0dW5uZWxVcmkiOm51bGwsInVwZGF0ZWRBdCI6MTAwMH0="
-    private val sig = "MEQCIAgOyxkhvzXgeptu43wB0mhwCO2utV7ctvkyj07QkK9kAiAGwX5Kjixu7tVV1fo7ZdeYLfnRfCc9jx4AShRYyRHIew=="
+    private val payload = "eyJ2ZXJzaW9uIjoxLCJlbmRwb2ludHMiOlsid3NzOi8vODUuMTkwLjk4LjU3LnNzbGlwLmlvOjg0NDUvd3MiLCJ3c3M6Ly9iYWNrdXAuZXhhbXBsZS5jb20vd3MiXSwidHVubmVsVXJpIjpudWxsLCJ1cGRhdGVkQXQiOjEwMDB9"
+    private val sig = "MEYCIQCYjrFfhPG9HHixZpI42CmDz6OWNN0dUJsOVPwizUtxFgIhANT3yGE/JBy2IgT4EAXp3Kkl45tAY2JeX6Z5IDwormud"
 
     private fun envelope(p: String, s: String) = """{"payload":"$p","sig":"$s"}"""
 

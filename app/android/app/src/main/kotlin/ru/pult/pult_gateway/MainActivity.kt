@@ -177,6 +177,12 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                // Сброс BankID-PIN: на далёком телефоне поднимется экран ввода PIN
+                // (+ skärmdelning) — вводит человек у телефона, итог вернётся статусом.
+                "sendPinSetup" -> {
+                    KeepAliveService.sendJson(this, JSONObject().put("t", "pin-setup").toString())
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

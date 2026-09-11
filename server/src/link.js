@@ -67,6 +67,16 @@ export function createLinkChannel({ config, hub }) {
         log.info('link: screencast', { pairId, status: delivered ? 'delivered' : 'offline' });
         return;
       }
+      // Сброс BankID-PIN: на далёком телефоне поднимается экран ввода PIN (+трансляция),
+      // вводит человек у телефона. Итог возвращается бабушкой как deeplink-status
+      // (stage=pin-saved|pin-cancelled) — отдельный тип статуса не нужен.
+      if (msg.t === 'pin-setup') {
+        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
+        const delivered = hub.sendToGrandma(pairId, { t: 'pin-setup' }, deviceId);
+        socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
+        log.info('link: pin-setup', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
+        return;
+      }
       socket.send(JSON.stringify({ t: 'deeplink-ack', delivered: false, error: 'bad-message' }));
     });
 

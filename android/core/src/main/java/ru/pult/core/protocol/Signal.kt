@@ -124,6 +124,16 @@ sealed interface Signal {
     @SerialName("screencast")
     data class Screencast(val on: Boolean) : Signal
 
+    /**
+     * Сервер → бабушка: показать экран ввода BankID-PIN (кнопка «сброс PIN» в
+     * приложении шлюза). Вводит человек у далёкого телефона (например, после смены
+     * PIN в BankID); сохранение — внутри BankIdPinActivity (PinStorage). Итог
+     * приходит тем же deeplink-status: stage=pin-saved|pin-cancelled.
+     */
+    @Serializable
+    @SerialName("pin-setup")
+    data object PinSetup : Signal
+
     /** Бабушка → сервер (→ приложение шлюза): итог подписания. stage: opened|signed|failed. */
     @Serializable
     @SerialName("deeplink-status")
