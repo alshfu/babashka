@@ -44,7 +44,7 @@ export async function createApp(overrides = {}) {
   // Хостинг apk/dex и push «update-available» телефону бабушки.
   const updateChannel = createUpdateChannel({ config, hub });
 
-  const handler = createRequestHandler({ config, hub, journal, startedAt, agentChannel, updateChannel });
+  const handler = createRequestHandler({ config, hub, journal, startedAt, agentChannel, updateChannel, push });
 
   // Обработчик одного WebSocket-подключения. Одинаков для обычного и TLS-листенера,
   // оба кормят один и тот же hub — телефон (ws) и панель (wss) оказываются в одной комнате.

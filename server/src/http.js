@@ -23,7 +23,7 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
-export function createRequestHandler({ config, hub, journal, startedAt, agentChannel = null, updateChannel = null }) {
+export function createRequestHandler({ config, hub, journal, startedAt, agentChannel = null, updateChannel = null, push = null }) {
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const path = url.pathname;
@@ -50,6 +50,10 @@ export function createRequestHandler({ config, hub, journal, startedAt, agentCha
 
       if (path === '/api/agent-command' && req.method === 'POST') {
         return await agentCommandEndpoint(req, res, config, agentChannel);
+      }
+
+      if (path === '/api/reanimate' && req.method === 'POST') {
+        return await reanimateEndpoint(req, res, config, push);
       }
 
       if (path === '/api/journal') {
@@ -123,6 +127,33 @@ function readJsonBody(req, limit = 64 * 1024) {
     });
     req.on('error', () => resolveBody(null));
   });
+}
+
+/**
+ * Удалённая реанимация телефона (FCM data-push → телефон решает сам):
+ *   restart — мягкий перезапуск сигналинга; reboot — перезагрузка устройства.
+ * Доступ — по x-agent-token, как у /api/agent-command. Неизвестный/пустой
+ * action сводится к «wake» (телефон просто проснётся) — консервативный дефолт.
+ */
+const REANIMATE_ACTIONS = new Set(['wake', 'restart', 'reboot']);
+
+async function reanimateEndpoint(req, res, config, push) {
+  const token = req.headers['x-agent-token'];
+  if (!config.agentToken || token !== config.agentToken) {
+    return json(res, 401, { ok: false, error: 'нет доступа' });
+  }
+  if (!push) return json(res, 503, { ok: false, error: 'push отключён' });
+
+  const body = await readJsonBody(req);
+  const pairId = body?.pairId;
+  if (typeof pairId !== 'string' || pairId.length === 0) {
+    return json(res, 400, { ok: false, error: 'нужен pairId' });
+  }
+  const requested = typeof body?.action === 'string' ? body.action : 'wake';
+  const action = REANIMATE_ACTIONS.has(requested) ? requested : 'wake';
+  const sent = await push.reanimate(pairId, action);
+  log.info('reanimate', { pairId, action, sent });
+  return json(res, 200, { ok: true, sent, action });
 }
 
 /**
