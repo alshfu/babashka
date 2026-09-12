@@ -1,4 +1,4 @@
-﻿# win-screens-watchdog — СТОРОЖ ЖИВЫХ ЭКРАНОВ НА ALSH. НЕ УДАЛЯТЬ.
+# win-screens-watchdog — СТОРОЖ ЖИВЫХ ЭКРАНОВ НА ALSH. НЕ УДАЛЯТЬ.
 #
 # Железное правило проекта (AGENTS.md): экраны Note 10 и Redmi на Windows-машине
 # ALSH видны ВСЕГДА. У оператора нет возможности подойти к устройствам —
@@ -25,13 +25,19 @@ $POLL_SEC = 15
 
 # Кто обязан быть на экране: серийник → заголовок окна.
 $DEVICES = @(
-    @{ Serial = 'R58M9167C4H';      Title = 'Note 10 (B-app)' },
+    @{ Serial = 'R58M9167C4H';      Title = 'Note10 (B-app)' },
     @{ Serial = 'DQ6TC64DY9PRBE4T'; Title = 'Redmi (A-app)' }
 )
 
 function Log([string]$msg) {
-    $line = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $msg
-    Add-Content -Path $LOG -Value $line -Encoding UTF8
+    # test_logs может не существовать на свежем checkout — создаём; лог не должен
+    # ронять сторож, поэтому любые ошибки записи глотаем.
+    try {
+        $dir = Split-Path $LOG -Parent
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $line = '{0:yyyy-MM-dd HH:mm:ss} {1}' -f (Get-Date), $msg
+        Add-Content -Path $LOG -Value $line -Encoding UTF8
+    } catch { }
 }
 
 function AdbArgsOk { (Test-Path $ADB) -and (Test-Path $SCRCPY) }
