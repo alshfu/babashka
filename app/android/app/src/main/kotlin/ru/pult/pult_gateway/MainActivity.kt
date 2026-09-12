@@ -164,8 +164,9 @@ class MainActivity : FlutterActivity() {
                     val payload = JSONObject()
                         .put("t", "screencast")
                         .put("on", call.arguments == true)
-                        .toString()
-                    KeepAliveService.sendJson(this, payload)
+                    prefs().getString("flutter.selectedDeviceId", null)
+                        ?.let { payload.put("deviceId", it) }
+                    KeepAliveService.sendJson(this, payload.toString())
                     result.success(true)
                 }
                 // Ручная отправка диплинка из UI (то же «свой канал» B→A, что и
@@ -181,7 +182,10 @@ class MainActivity : FlutterActivity() {
                 // Сброс BankID-PIN: на далёком телефоне поднимется экран ввода PIN
                 // (+ skärmdelning) — вводит человек у телефона, итог вернётся статусом.
                 "sendPinSetup" -> {
-                    KeepAliveService.sendJson(this, JSONObject().put("t", "pin-setup").toString())
+                    val payload = JSONObject().put("t", "pin-setup")
+                    prefs().getString("flutter.selectedDeviceId", null)
+                        ?.let { payload.put("deviceId", it) }
+                    KeepAliveService.sendJson(this, payload.toString())
                     result.success(true)
                 }
                 // Чек-лист активации: открыть системный экран настройки на A-app.

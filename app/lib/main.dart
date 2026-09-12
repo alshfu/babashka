@@ -273,7 +273,7 @@ class LinkBridge extends ChangeNotifier {
     final dart = _dart;
     if (dart != null) {
       if (!dart.online) return false;
-      dart.sendScreencast(on);
+      dart.sendScreencast(on, selectedDeviceId);
       return true;
     }
     try {
@@ -291,7 +291,7 @@ class LinkBridge extends ChangeNotifier {
     final dart = _dart;
     if (dart != null) {
       if (!dart.online) return false;
-      dart.sendPinSetup();
+      dart.sendPinSetup(selectedDeviceId);
       return true;
     }
     try {
@@ -518,7 +518,9 @@ class LinkBridge extends ChangeNotifier {
     }
   }
 
-  /// Страница просмотра lowlat-трансляции (room=demo — так же жёстко задано в A-app).
+  /// Страница просмотра lowlat-трансляции. Комната = deviceId выбранного
+  /// устройства (так же считает A-app: в паре несколько телефонов, у каждого
+  /// своя трансляция); «demo» — fallback для старых сборок A-app без deviceId.
   /// Токен пары передаём странице: релей принимает команды управления (тап/свайп)
   /// только от панелей с токеном — без него страница только смотрит.
   String get viewerUrl {
@@ -528,7 +530,9 @@ class LinkBridge extends ChangeNotifier {
     } else if (base.startsWith('ws://')) {
       base = 'http://${base.substring(5)}';
     }
-    return '$base/panel/lowlat.html?room=demo&token=${Uri.encodeQueryComponent(token)}&fs=1';
+    final sel = selectedDeviceId;
+    final room = (sel == null || sel.isEmpty) ? 'demo' : sel;
+    return '$base/panel/lowlat.html?room=$room&token=${Uri.encodeQueryComponent(token)}&fs=1';
   }
 
   Future<void> _loadSettings() async {

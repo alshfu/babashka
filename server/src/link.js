@@ -70,9 +70,10 @@ export function createLinkChannel({ config, hub }) {
       // Управление показом экрана: приложение просит телефон начать/завершить
       // lowlat-трансляцию (H.264 по /lowlat уже есть; это лишь пуск/стоп).
       if (msg.t === 'screencast') {
-        const delivered = hub.sendToGrandma(pairId, { t: 'screencast', on: msg.on === true });
+        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
+        const delivered = hub.sendToGrandma(pairId, { t: 'screencast', on: msg.on === true }, deviceId);
         socket.send(JSON.stringify({ t: 'screencast-ack', delivered }));
-        log.info('link: screencast', { pairId, status: delivered ? 'delivered' : 'offline' });
+        log.info('link: screencast', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
         return;
       }
       // Сброс BankID-PIN: на далёком телефоне поднимается экран ввода PIN (+трансляция),

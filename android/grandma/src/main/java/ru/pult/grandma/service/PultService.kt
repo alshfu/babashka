@@ -951,7 +951,9 @@ class PultService : LifecycleService() {
             // поэтому сначала будим и отпираем (вейклок + keyguard-невидимка + свайп + PIN).
             if (signal.on) ru.pult.grandma.control.ScreenUnlock.unlock(this)
             val cmd = if (signal.on) {
-                val url = pair.signalingUrl.removeSuffix("/ws") + "/lowlat?room=demo&role=device"
+                // Комната = deviceId: в паре несколько A-app, у каждой своя трансляция.
+                val url = pair.signalingUrl.removeSuffix("/ws") +
+                    "/lowlat?room=${deviceId()}&role=device"
                 "am start -n se.pult.app/ru.pult.grandma.lowlat.LowLatActivity" +
                     " --ei bitrate 1500000 --ei fps 20 --es url '$url'"
             } else {
