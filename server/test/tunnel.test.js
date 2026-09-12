@@ -60,3 +60,39 @@ test('/tunnel: уход одной стороны закрывает втору�
   app.close();
   assert.equal(await closed, 4001);
 });
+
+test('/tunnel: два телефона с deviceId сосуществуют, app выбирает свой', async (t) => {
+  const { port } = await start(t);
+  const pair = pairId('d');
+  const url = (side, device) => `${tunnelUrl(port, pair, side)}&deviceId=${device}`;
+  const redmi = await connect(url('phone', 'dev-redmi'));
+  const emu = await connect(url('phone', 'dev-emu'));
+
+  // Второй телефон НЕ вытесняет первого.
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(redmi.readyState, redmi.OPEN);
+  assert.equal(emu.readyState, emu.OPEN);
+
+  // App с deviceId адресуется именно своему телефону.
+  const app = await connect(url('app', 'dev-emu'));
+  const toEmu = new Promise((done) => emu.once('message', (d) => done(d)));
+  const toRedmi = new Promise((done) => redmi.once('message', (d) => done(d)));
+  app.send(Buffer.from([0, 0, 0, 1, 0, 65]), { binary: true }); // stream 1, op=open
+  assert.deepEqual([...(await toEmu)], [0, 0, 0, 1, 0, 65]);
+  const leaked = await Promise.race([toRedmi, new Promise((r) => setTimeout(() => r(null), 150))]);
+  assert.equal(leaked, null);
+
+  // Ответ идёт только владельцу потока.
+  const back = new Promise((done) => app.once('message', (d) => done(d)));
+  emu.send(Buffer.from([0, 0, 0, 1, 1, 66]), { binary: true }); // stream 1, op=data
+  assert.deepEqual([...(await back)], [0, 0, 0, 1, 1, 66]);
+
+  // Уход emu рвёт только привязанного к нему app; redmi живёт.
+  const appClosed = new Promise((done) => app.once('close', done));
+  emu.close();
+  assert.equal(await appClosed, 4001);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(redmi.readyState, redmi.OPEN);
+
+  redmi.close();
+});

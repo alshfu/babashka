@@ -30,7 +30,8 @@ const isBankIdUrl = (url) =>
 
 // Шаги первичной настройки телефона бабушки (батарея, оверлей и т.п.) —
 // приложение просит далёкий телефон открыть нужный системный экран.
-const SETUP_STEPS = new Set(['battery', 'overlay', 'notifications', 'usage', 'autostart']);
+// «pairing» — не системный экран, а PairingActivity самой A-app (QR спаривания).
+const SETUP_STEPS = new Set(['battery', 'overlay', 'notifications', 'usage', 'autostart', 'pairing']);
 
 export function createLinkChannel({ config, hub }) {
   const links = new Map();   // pairId → Set<socket>

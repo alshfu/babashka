@@ -68,11 +68,14 @@ class Device {
 
 class LinkBridge extends ChangeNotifier {
   static const defaultServer = 'wss://85.190.98.57.sslip.io:8445';
-  static const defaultPairId = 'Dl8YrhLu00VwOz62sQr4gw';
+  // Пара 2026-09-12: Redmi переустановлен (смена подписи → снос данных), старая
+  // пара Dl8YrhLu00VwOz62sQr4gw мертва. При новой переустановке A-app pairId
+  // меняется — обновить здесь и поднять defaultsVersion.
+  static const defaultPairId = 'fsWn0OVY8VrzmNvmEQpqhA';
   static const defaultToken = 'Pxj6sCxMzQEsthyDRyLaV6IfM9zFu5M5';
   // Inkakade inställningar: höj när default-värdena ändras — då skrivs de
   // över i befintliga installationer vid nästa start (init → _loadSettings).
-  static const defaultsVersion = 2;
+  static const defaultsVersion = 3;
   static const _ch = MethodChannel('pult.gateway/link');
   static const _control = MethodChannel('pult.gateway/control');
   static const tunnelPort = 8877;
@@ -1255,7 +1258,7 @@ class _DevicePageState extends State<DevicePage> {
             _setupRow('Användningsåtkomst', 'usage'),
             _setupRow('Visa över andra appar', 'overlay'),
             _setupRow('Autostart', 'autostart'),
-            _setupRow('Parkoppling', 'paired', canOpen: false),
+            _setupRow('Parkoppling', 'paired'),
           ],
         ),
       ),

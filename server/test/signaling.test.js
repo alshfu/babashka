@@ -250,6 +250,38 @@ describe('сигналинг', () => {
     await grandma.close();
   });
 
+  test('несколько бабушек с разными deviceId сосуществуют (авто-пара на разных телефонах)', async () => {
+    const id = pairId('multi-grandma');
+    const redmi = await TestClient.connect(ctx.url);
+    await redmi.hello({ pairId: id, role: 'grandma', deviceId: 'dev-redmi' });
+    const emu = await TestClient.connect(ctx.url);
+    const ok = await emu.hello({ pairId: id, role: 'grandma', deviceId: 'dev-emu' });
+
+    // Вторая бабушка НЕ вытесняет первую (вытеснение — только при совпадении deviceId).
+    assert.equal(ok.peerOnline, false); // помощников нет — peer = помощник
+    assert.deepEqual(ctx.app.hub.inspect(id).roles.sort(), ['grandma', 'grandma']);
+
+    // Переподключение первой с тем же deviceId вытесняет только её собственный сокет.
+    const redmi2 = await TestClient.connect(ctx.url);
+    await redmi2.hello({ pairId: id, role: 'grandma', deviceId: 'dev-redmi' });
+    const replaced = await redmi.next('error');
+    assert.equal(replaced.code, 'replaced');
+    assert.deepEqual(ctx.app.hub.inspect(id).roles.sort(), ['grandma', 'grandma']);
+
+    // Помощник видит пару онлайн, пока жива хотя бы одна бабушка.
+    const helper = await TestClient.connect(ctx.url);
+    const hello = await helper.hello({ pairId: id, role: 'helper', deviceId: 'dev-helper' });
+    assert.equal(hello.peerOnline, true);
+    await redmi2.close();
+    const still = await TestClient.connect(ctx.url);
+    const hello2 = await still.hello({ pairId: id, role: 'helper', deviceId: 'dev-helper2' });
+    assert.equal(hello2.peerOnline, true);
+
+    await emu.close();
+    await helper.close();
+    await still.close();
+  });
+
   test('запрос ждёт бабушку, которая подключилась позже (сценарий «телефон спал»)', async () => {
     const id = pairId('wake');
     const helper = await TestClient.connect(ctx.url);

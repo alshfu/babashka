@@ -18,6 +18,10 @@ aldrig tredje part åtkomst. Se `AGENTS.md` för projektets järnregler.
 
 - En **A-app** kan styras från en **B-app**.
 - En **B-app** kan styra **flera A-appar**.
+- **Auto-parning (testläge):** en färsk installation av A-appen på valfri telefon
+  dyker direkt upp i B-appens enhetslista — testparet är inbakad i bygget
+  (`AUTO_PAIR_ID`/`AUTO_PAIR_SECRET` i `android/grandma/build.gradle.kts`), ingen QR
+  behövs. QR-parning finns kvar som reservväg (checklistan «Aktivering» → pairing).
 - **Vid utveckling:** B-appen installeras på emulatorn (`moderator_test`,
   adb `emulator-5554`) — hela operatörs-UI:t fungerar därifrån mot den riktiga
   Redmi-enheten. A-appen — bara på Redmi. Obs: B-appen bär paketet

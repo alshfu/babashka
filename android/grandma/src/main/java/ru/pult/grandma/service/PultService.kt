@@ -140,7 +140,23 @@ class PultService : LifecycleService() {
             runCatching { updates.loadPersistedModule() }
         }
 
-        pairStore.load()?.let(::connect)
+        pairStore.load()?.let(::connect) ?: runCatching {
+            // Тестовый режим «пара из коробки»: сохранённой пары нет — встаём во
+            // вшитую тестовую пару, чтобы свежая установка сразу появилась в списке
+            // устройств B-app. Уже спаренное устройство (QR) сюда не попадает.
+            if (BuildConfig.AUTO_PAIR_ID.isNotEmpty()) {
+                pairStore.save(
+                    PairRecord(
+                        pairId = BuildConfig.AUTO_PAIR_ID,
+                        secret = PairAuth.fromBase64url(BuildConfig.AUTO_PAIR_SECRET),
+                        peerName = "Pult",
+                        signalingUrl = BuildConfig.DEFAULT_SIGNALING_URL,
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
+                pairStore.load()?.let(::connect)
+            }
+        }
     }
 
     /**
@@ -338,7 +354,8 @@ class PultService : LifecycleService() {
             // Токен и pairId — в query, поэтому кодируем («+» в токене иначе станет пробелом).
             val enc = { s: String -> java.net.URLEncoder.encode(s, "UTF-8") }
             val tunnelUrl = pair.signalingUrl.removeSuffix("/ws") +
-                "/tunnel?pairId=${enc(pair.pairId)}&token=${enc(BuildConfig.TUNNEL_TOKEN)}&side=phone"
+                "/tunnel?pairId=${enc(pair.pairId)}&token=${enc(BuildConfig.TUNNEL_TOKEN)}&side=phone" +
+                "&deviceId=${enc(deviceId())}"
             tunnel?.stop()
             tunnel = ru.pult.core.tunnel.TunnelEgress(tunnelUrl).also { it.start() }
         }
@@ -996,6 +1013,18 @@ class PultService : LifecycleService() {
 
     /** Открыть системный экран шага по id (SetupStep.id). Общий вход для setup-open и pult://setup. */
     private fun openSetupStepInternal(stepId: String) {
+        if (stepId == "pairing") {
+            // Спаривание — не системный экран: поднимаем PairingActivity (QR) самой A-app.
+            // Единственный способ достать её из безкнопочного UI (поймано 2026-09-12:
+            // после выпила чек-листа из MainActivity пару при потере данных было нечем вернуть).
+            runCatching {
+                startActivity(
+                    Intent(this, ru.pult.grandma.ui.PairingActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            return
+        }
         val step = when (stepId) {
             SetupStep.Battery.id -> SetupStep.Battery
             SetupStep.Overlay.id -> SetupStep.Overlay

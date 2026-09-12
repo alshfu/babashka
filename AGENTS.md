@@ -109,9 +109,27 @@ Swedbank → tap «Logga in»
   дальше браузер/IDE на `socks5h://127.0.0.1:11080` (DNS резолвится в Швеции).
   Альтернатива доступа — Tailscale (на VPS уже `tailscaled`): привязать шлюз
   к tailnet-IP и ходить напрямую.
+- **Телефонов в паре может быть несколько** (тестовый режим авто-пары): слот phone
+  в `/tunnel` ключуется `deviceId` (query-параметр у обеих сторон), вытеснение —
+  только своего сокета. Шлюз прибит к Redmi: `TUNNEL_DEVICE=njoAYzichhY` в юните
+  `pult-tunnel-gateway.service`; без `deviceId` app-сторона получает первый живой
+  телефон (старое поведение). `TUNNEL_TOKEN` вшит в демо-сборку A-app
+  (`android/grandma/build.gradle.kts`), поэтому туннель поднимается из коробки.
 - **Нативный прокси B-app** (Android, `TunnelProxyNative` на 127.0.0.1:8877) — путь для
   Note 10, оставлен без изменений. На iOS системного прокси нет (нужен Network
   Extension, заблокирован до починки Apple ID) — iPhone ходит через VPS-шлюз.
+
+### Тестовый режим: авто-пара без QR
+
+Свежая установка A-app на ЛЮБОЙ телефон сразу появляется в списке устройств B-app:
+при первом старте `PultService` без сохранённой пары встаёт во вшитую тестовую пару
+(`AUTO_PAIR_ID`/`AUTO_PAIR_SECRET` в `android/grandma/build.gradle.kts`, оверрайд —
+окружением при сборке; пустой `AUTO_PAIR_ID` выключает). Сервер секрет при hello не
+проверяет — он нужен только для E2E WebRTC-сессий. Уже спаренное устройство (QR)
+авто-пара не трогает. Несколько A-app в одной паре — норма: в хабе слот
+`grandma:<deviceId>`, revoke и help-request работают как раньше (revoke — всем
+бабушкам, «одна бабушка» для WebRTC — первая живая). QR-спаривание остаётся запасным
+путём: карточка «Aktivering» в B-app → шаг `pairing` (setup-open) → PairingActivity.
 
 ### «Свой канал» B→A: BankID активируется ТОЛЬКО по запросу из B-app
 
@@ -169,6 +187,13 @@ scrcpy сам себя не перезапускает (любой USB/adb-сб�
 appops set se.pult.app SYSTEM_ALERT_WINDOW allow
 appops set se.pult.app 10021 allow   # background start activity
 ```
+
+При установке по USB MIUI один раз спрашивает «Installera via USB» — на Redmi
+отмечено «Kom ihåg mitt val», больше не спрашивает. Если устройство на ALSH стало
+`unauthorized` (или пропало из `adb devices`) — это физический уровень: кабель/
+RSA-диалог на экране, софтом снаружи не лечится (все exec-каналы A-app идут через
+adbd/LanAgent, которые в этот момент недоступны). Нужен человек у телефона:
+переткнуть USB и подтвердить «Разрешить отладку» (с галочкой «Всегда»).
 
 ### Разово при настройке Redmi
 

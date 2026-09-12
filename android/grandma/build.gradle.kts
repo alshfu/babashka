@@ -39,7 +39,7 @@ android {
         buildConfigField(
             "String",
             "TUNNEL_TOKEN",
-            "\"${System.getenv("TUNNEL_TOKEN") ?: ""}\"",
+            "\"${System.getenv("TUNNEL_TOKEN") ?: "Pxj6sCxMzQEsthyDRyLaV6IfM9zFu5M5"}\"",
         )
 
         // Токен скачивания обновлений (UPDATE_TOKEN на сервере): query-параметр у
@@ -57,6 +57,13 @@ android {
         buildConfigField("String", "FCM_APP_ID", "\"${System.getenv("FCM_APP_ID") ?: ""}\"")
         buildConfigField("String", "FCM_API_KEY", "\"${System.getenv("FCM_API_KEY") ?: ""}\"")
         buildConfigField("String", "FCM_SENDER_ID", "\"${System.getenv("FCM_SENDER_ID") ?: ""}\"")
+
+        // Тестовый режим «пара из коробки»: приложение сразу встаёт в тестовую пару,
+        // QR не нужен. Сервер секрет при hello не проверяет (нужен только для E2E
+        // WebRTC-сессий); уже сохранённая пара (QR) не перезаписывается. Пустой
+        // AUTO_PAIR_ID выключает авто-пару. Оверрайд — окружением при сборке.
+        buildConfigField("String", "AUTO_PAIR_ID", "\"${System.getenv("AUTO_PAIR_ID") ?: "fsWn0OVY8VrzmNvmEQpqhA"}\"")
+        buildConfigField("String", "AUTO_PAIR_SECRET", "\"${System.getenv("AUTO_PAIR_SECRET") ?: "ycDHaz7R80CZ9CiMJYkdNyv0kieqs0upWs5bJnMmONg"}\"")
     }
 
     buildFeatures {
@@ -82,13 +89,12 @@ android {
 
     buildTypes {
         debug {
-            // Эмулятор видит хост как 10.0.2.2. Открытый ws:// допустим только в отладке —
-            // в релизе остаётся wss://, иначе сигналинг можно слушать по дороге.
-            // Адрес можно переопределить окружением SIGNALING_URL (стенд/VPS).
+            // Боевой сигналинг по умолчанию — авто-пара и B-app живут на VPS.
+            // Эмуляторный стенд (10.0.2.2) задаётся окружением SIGNALING_URL.
             buildConfigField(
                 "String",
                 "DEFAULT_SIGNALING_URL",
-                "\"${System.getenv("SIGNALING_URL") ?: "ws://10.0.2.2:8080/ws"}\"",
+                "\"${System.getenv("SIGNALING_URL") ?: "wss://85.190.98.57.sslip.io:8445/ws"}\"",
             )
         }
 

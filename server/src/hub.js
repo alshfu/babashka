@@ -20,13 +20,21 @@ const HOUR_MS = 60 * 60 * 1000;
  * доставляет сообщения тем, кому они адресованы (docs/architecture.md §4).
  */
 /**
- * Слот присутствия в паре. Бабушка одна на пару (ключ 'grandma'), помощников
- * может быть НЕСКОЛЬКО — по одному на deviceId (телефон под рукой + планшет
- * хозяина + веб-панель): тестирование идёт с нескольких устройств одновременно,
- * вытеснять их друг друга не должны. Тот же deviceId = тот же слот (реконнект
+ * Слот присутствия в паре — по одному на deviceId для ОБЕИХ ролей. Тестовый
+ * режим (2026-09-12): A-app ставится на несколько телефонов сразу (авто-пара без
+ * QR), все должны быть видны в списке устройств и управляться по deviceId —
+ * вытеснять друг друга они не должны. Тот же deviceId = тот же слот (реконнект
  * приложения с прежним вытеснением, см. handleHello).
+ * Там, где протоколу нужна «одна бабушка» (сессии WebRTC, fallback без deviceId),
+ * берётся ПЕРВАЯ живая бабушка пары (primaryGrandma).
  */
-const slotKey = (role, deviceId) => (role === 'grandma' ? 'grandma' : `helper:${deviceId}`);
+const slotKey = (role, deviceId) => `${role}:${deviceId}`;
+
+/** Все живые бабушки пары (A-app на нескольких телефонах — норма тестового режима). */
+const grandmas = (pair) => [...pair.sockets.values()].filter((s) => s.role === 'grandma');
+
+/** «Главная» бабушка для мест протокола, где нужна одна: первая по подключению. */
+const primaryGrandma = (pair) => grandmas(pair)[0] ?? null;
 
 export class Hub {
   #config;
@@ -274,14 +282,15 @@ export class Hub {
     // команду и доставляем на следующем hello. Сервер её подделать не может (нет секрета),
     // поэтому хранить её у себя безопасно: максимум — отложенный отказ в доступе.
     if (message.t === 'revoke') {
-      const grandma = pair.sockets.get('grandma');
-      if (grandma) {
-        grandma.send({ t: 'revoke', nonce: message.nonce, mac: message.mac });
+      // Бабушек может быть несколько (тестовый режим): отзыв пары получают ВСЕ.
+      const targets = grandmas(pair);
+      if (targets.length > 0) {
+        for (const g of targets) g.send({ t: 'revoke', nonce: message.nonce, mac: message.mac });
       } else {
         pair.pendingRevoke = { nonce: message.nonce, mac: message.mac };
         this.#push?.wakeGrandma(pair.pairId, null);
       }
-      conn.send({ t: 'revoke-queued', online: Boolean(grandma) });
+      conn.send({ t: 'revoke-queued', online: targets.length > 0 });
       log.info('revoke', { pairId: pair.pairId, role: conn.role });
       return;
     }
@@ -334,14 +343,15 @@ export class Hub {
   }
 
   #relay(pair, conn, message, sessionId) {
-    // Помощник всегда говорит с единственной бабушкой; ответы бабушки — тому помощнику,
+    // Помощник говорит с первой живой бабушкой (в тестовом режиме их может быть
+    // несколько — сессионный канал исторически один); ответы бабушки — тому помощнику,
     // который открыл текущую сессию (вне сессии — любому живому помощнику).
     let peer = null;
     if (conn.role === 'grandma') {
       if (sessionId && pair.session?.requestedByConn) peer = pair.session.requestedByConn;
       if (!peer) peer = [...pair.sockets.values()].find((s) => s.role === 'helper');
     } else {
-      peer = pair.sockets.get('grandma');
+      peer = primaryGrandma(pair);
     }
     if (!peer) {
       conn.send({ t: 'error', code: ERROR.PEER_OFFLINE, message: 'the other side is offline' });
@@ -387,7 +397,7 @@ export class Hub {
     pair.requestTimes.push(now);
     this.#stats.sessionsStarted += 1;
 
-    const grandma = pair.sockets.get('grandma');
+    const grandma = primaryGrandma(pair);
     conn.send({ t: 'help-request-sent', sessionId: session.id, peerOnline: Boolean(grandma) });
 
     if (grandma) {
@@ -495,7 +505,8 @@ export class Hub {
       grandma = this.#deviceConns.get(deviceConnKey(pairId, deviceId)) ?? null;
     }
     if (!grandma) {
-      grandma = pair?.sockets.get('grandma');
+      // Без deviceId — первая живая бабушка пары (их может быть несколько).
+      grandma = pair ? primaryGrandma(pair) : null;
     }
     if (!grandma) {
       // Бабушка офлайн (сон/мёртвый TCP): диплинк кладём в очередь — отдадим при hello.
@@ -585,8 +596,8 @@ export class Hub {
     const pair = this.#pairs.get(pairId);
     if (!pair) return null;
     return {
-      // Слоты helper:<deviceId> сворачиваем обратно в роли — внешний вид прежний.
-      roles: [...pair.sockets.keys()].map((key) => (key === 'grandma' ? 'grandma' : 'helper')),
+      // Слоты <role>:<deviceId> сворачиваем обратно в роли — внешний вид прежний.
+      roles: [...pair.sockets.values()].map((socket) => socket.role),
       session: pair.session ? { id: pair.session.id, state: pair.session.state } : null,
       requestsLastHour: pair.requestTimes.length,
       consecutiveNoAnswer: pair.consecutiveNoAnswer,

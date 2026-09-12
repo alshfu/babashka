@@ -35,6 +35,8 @@ const LISTEN_HOST = process.env.TUNNEL_LISTEN_HOST ?? '127.0.0.1';
 const LISTEN_PORT = Number(process.env.TUNNEL_LISTEN_PORT ?? 11080);
 const UPSTREAM = process.env.TUNNEL_UPSTREAM ?? 'ws://127.0.0.1:8090/tunnel';
 const PAIR = process.env.TUNNEL_PAIR ?? '';
+// Какой телефон пары обслуживает потоки шлюза (пусто — первый живой).
+const DEVICE = process.env.TUNNEL_DEVICE ?? '';
 const TOKEN = process.env.TUNNEL_TOKEN ?? '';
 
 if (!PAIR || !TOKEN) {
@@ -87,7 +89,8 @@ function handleConnection(client) {
   };
 
   const openTunnel = (target) => {
-    const url = `${UPSTREAM}?pairId=${encodeURIComponent(PAIR)}&token=${encodeURIComponent(TOKEN)}&side=app`;
+    const url = `${UPSTREAM}?pairId=${encodeURIComponent(PAIR)}&token=${encodeURIComponent(TOKEN)}&side=app` +
+      (DEVICE ? `&deviceId=${encodeURIComponent(DEVICE)}` : '');
     streamId = crypto.randomBytes(4).readUInt32BE(0);
     log('open:', target);
     ws = new WebSocket(url, { maxPayload: 4 * 1024 * 1024 });
