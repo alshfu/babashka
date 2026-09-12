@@ -146,12 +146,16 @@ class UpdateManager(private val context: Context) {
             return Attempt(true, true, null)
         }
         // Тихий путь недоступен (wireless debugging выключена и т.п.) — системный
-        // установщик с подтверждением человеком/оператором. Повторно не донимаем.
-        return if (openInstaller(file)) {
-            markKnown(KIND_APK, version)
-            Attempt(true, true, "manual-confirm")
-        } else {
-            Attempt(true, false, "install: $silentErr")
+        // установщик с подтверждением человеком/оператором.
+        // ВАЖНО: markKnown здесь НЕ ставим — иначе «известность» прилипает раньше
+        // факта установки, и OTA больше никогда не применится: телефон отвечает
+        // already-installed, а код остаётся старым (поймано 2026-09-12: pin-cancelled
+        // ровно через 2 мин = старый таймаут). Известность наступит через
+        // installedVersion() (versionName теперь = BUILD_VERSION) или при следующей
+        // тихой попытке. Показ установщика троттлим, чтобы не донимать человека.
+        return when {
+            !openInstallerThrottled(file) -> Attempt(false, true, "manual-waiting")
+            else -> Attempt(true, true, "manual-confirm")
         }
     }
 
@@ -182,7 +186,19 @@ class UpdateManager(private val context: Context) {
         return "pm: ${out.take(100)}"
     }
 
-    /** Ручной маршрут: системный установщик поверх FileProvider (подтверждает человек). */
+    /**
+     * Ручной маршрут: системный установщик поверх FileProvider (подтверждает человек).
+     * Показываем не чаще раза в [MANUAL_PROMPT_INTERVAL_MS] — иначе периодическая
+     * проверка будет донимать окном установки, пока человек не подойдёт.
+     */
+    private fun openInstallerThrottled(file: File): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(KEY_MANUAL_PROMPT_AT, 0) < MANUAL_PROMPT_INTERVAL_MS) return false
+        val opened = openInstaller(file)
+        if (opened) prefs.edit().putLong(KEY_MANUAL_PROMPT_AT, now).apply()
+        return opened
+    }
+
     private fun openInstaller(file: File): Boolean = runCatching {
         if (!context.packageManager.canRequestPackageInstalls()) {
             // Разрешение на установку из этого источника выдаётся один раз, вручную.
@@ -341,5 +357,7 @@ class UpdateManager(private val context: Context) {
         private const val KEY_P_VERSION = "pending_version"
         private const val KEY_P_OK = "pending_ok"
         private const val KEY_P_ERR = "pending_err"
+        private const val KEY_MANUAL_PROMPT_AT = "manual_prompt_at"
+        private const val MANUAL_PROMPT_INTERVAL_MS = 6 * 60 * 60 * 1000L
     }
 }

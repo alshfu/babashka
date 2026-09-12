@@ -16,7 +16,11 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1"
+        // Маркер сборки в versionName: UpdateManager сверяет его с версией OTA-манифеста
+        // (installedVersion) — без BUILD_VERSION версия всегда "0.1" и OTA не может
+        // отличить старое приложение от нового (поймано 2026-09-12: known-флаг
+        // прилипал раньше факта установки, телефон отвечал already-installed старым кодом).
+        versionName = System.getenv("BUILD_VERSION") ?: "0.1"
 
         // Адрес сигналинга задаётся при сборке; в паре он всё равно перезаписывается
         // тем, что пришло в пакете спаривания.
