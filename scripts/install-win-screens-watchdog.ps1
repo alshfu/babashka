@@ -1,4 +1,4 @@
-# install-win-screens-watchdog — разовая установка автозапуска сторожа экранов на ALSH.
+﻿# install-win-screens-watchdog — разовая установка автозапуска сторожа экранов на ALSH.
 # Запуск: PowerShell от Администратора:
 #   powershell -ExecutionPolicy Bypass -File scripts\install-win-screens-watchdog.ps1
 #
