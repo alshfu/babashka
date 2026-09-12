@@ -160,6 +160,9 @@ class KeepAliveService : Service() {
                             ok = msg.optBoolean("ok"),
                             err = msg.optString("err"),
                         )
+                        "setup-status" -> msg.optJSONObject("steps")?.let { steps ->
+                            publishSetupStatus(steps.toString())
+                        }
                     }
                 } catch (_: Exception) {
                 }
@@ -205,6 +208,17 @@ class KeepAliveService : Service() {
                 .put("stage", stage)
                 .put("ok", ok)
                 .put("err", err)
+                .toString())
+            .apply()
+        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName))
+    }
+
+    /** Статус активации от A-app (setup-status): храним как {"steps": {…}} —
+     * тот же JSON, что ждёт Dart-сторона (_applySetupStatusRaw). */
+    private fun publishSetupStatus(stepsJson: String) {
+        prefs.edit()
+            .putString("lastSetupStatus", JSONObject()
+                .put("steps", JSONObject(stepsJson))
                 .toString())
             .apply()
         sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName))

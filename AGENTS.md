@@ -60,12 +60,24 @@ Swedbank → tap «Logga in»
 
 ### Компоненты
 
-- **B-app** — `app/` (Flutter, Note 10): `KeepAliveService` — /link + TunnelProxyNative (CONNECT-прокси
+- **B-app** — `app/` (Flutter, Note 10; **при разработке — эмулятор Mac `moderator_test`**:
+  там работает весь операторский UI против боевого Redmi; пакет `com.bankid.bus`
+  вытесняет настоящий BankID на эмуляторе): `KeepAliveService` — /link + TunnelProxyNative (CONNECT-прокси
   127.0.0.1:8877, весь трафик Note 10 выходит с IP выбранной A-app через /tunnel).
   Показывает список A-app-устройств, **не хранит PIN**.
 - **A-app** — `android/grandma/` (Readmi): PultService (/ws agent + /tunnel phone), BankIdAgent
-  (PIN-сценарий), `BankIdPinActivity` (единственный UI для первого ввода PIN), LanShell,
-  AdbShell (fallback), RemoteControlService (a11y — только НЕ в момент BankID).
+  (PIN-сценарий), `BankIdPinActivity` (единственный UI для первого ввода PIN — экран 1:1
+  повторяет numpad BankID 7.48: палитра/логотип/иконки/Inter извлечены из APK
+  `just_for_privat_use_and_test/com.bankid.bus_7.48.0.apk`, расклад с apktool лежит в
+  `build/apk-extract/bankid*/`). **Zero-click**: кнопок подтверждения нет — 6-я цифра
+  сохраняет PIN и закрывает экран автоматически (säkerhetskod всегда 6 цифр); ⌫ стирает,
+  отмена — системным «назад». Нижний ряд: ⌫ | 0 | пустая клавиша. `MainActivity` —
+  молчаливый экран статуса без единой кнопки (online/offline + имя помощника); локального
+  чек-листа настроек больше нет — настройку ведёт B-app кадрами /link: `setup-open {step}`
+  (A открывает системный экран шага из фона, step: battery|overlay|notifications|usage|autostart;
+  для autostart факт открытия пишется в prefs `pult_setup`), `setup-query` → ответ
+  `setup-status {steps:{…,paired}}` (также шлётся при ONLINE и через 10 с после setup-open).
+  LanShell, AdbShell (fallback), RemoteControlService (a11y — только НЕ в момент BankID).
   PIN хранится **только здесь**, локально и криптованно (`PinStorage`).
   Удалённое управление через lowlat-страницу: LowLatService диспатчит tap/swipe/nav
   **в LanAgent (injectInputEvent), а НЕ в a11y** — сторонние касания во время
@@ -111,7 +123,8 @@ A-app поднимает BankID исключительно по `Signal.Deeplink
 2. **Ручной** — кнопка «Skicka bankid-länk» на странице устройства (диалог с
    вводом `bankid:///…`; Android: channel `pult.gateway/link` →
    `KeepAliveService.sendDeeplink`, iOS: DartLinkService.sendDeeplink).
-Прочих путей нет: локальный тестовый диплинк `pult://bankid-login` из MainActivity
+Прочих путей нет: локальные тестовые диплинки `pult://bankid-login` и
+`pult://setup?step=<id>` (отладка setup-open без сервера) из MainActivity
 A-app — осознанное исключение для отладки без сервера. A отвечает статусами
 (`deeplink-status`: sent → opened → signed/failed) обратно в /link — B-app показывает
 их на странице устройства. Статус «received»-кадра нет (у протокола туннеля
@@ -136,6 +149,19 @@ adb на ALSH: `C:\Users\Administrator\IdeaProjects\babashka\tools\platform-tool
 2026.2.2, JetBrains-аккаунт общий с Mac). Прямой сценарий: `ssh Administrator@100.102.35.68`
 → `adb -s DQ6TC64DY9PRBE4T shell …`. Реаниматор поднимает PultService без рук: пока процесс
 жив, но сервис мёртв, телефон «офлайн» для сервера, но отвечает по USB.
+
+### Живые экраны на ALSH — ВСЕГДА видны (железное правило)
+
+У оператора нет возможности подойти к устройствам физически: окно scrcpy на ALSH —
+единственный «глаз» на телефон. **Окна scrcpy Note 10 (`R58M9167C4H`) и Redmi
+(`DQ6TC64DY9PRBE4T`) на рабочем столе ALSH обязаны быть видны всегда.**
+scrcpy сам себя не перезапускает (любой USB/adb-сбой — и окно мертво), поэтому
+это делает сторож: `scripts/win-screens-watchdog.ps1` (цикл 15 с: adb видит
+оба серийника → окно живо → иначе переподъём; лог `test_logs/win-screens-watchdog.log`).
+Автозапуск — задача Планировщика `PultScreensWatchdog`, ставится один раз:
+`powershell -ExecutionPolicy Bypass -File scripts\install-win-screens-watchdog.ps1`.
+Пропали окна на ALSH → первым делом проверить эту задачу и лог сторожа,
+а не закрывать вопрос «руками».
 
 ### MIUI-разрешения grandma (сбрасываются при pm install -r — перевыдать!)
 

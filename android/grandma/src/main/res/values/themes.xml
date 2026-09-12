@@ -4,13 +4,34 @@
         <item name="android:textSize">20sp</item>
     </style>
 
-    <style name="BankIdKey" parent="Widget.AppCompat.Button">
-        <item name="android:layout_width">72dp</item>
-        <item name="android:layout_height">72dp</item>
-        <item name="android:layout_margin">8dp</item>
-        <item name="android:background">@drawable/bankid_key_background</item>
-        <item name="android:textColor">@color/bankid_key_text</item>
-        <item name="android:textSize">22sp</item>
-        <item name="android:textStyle">bold</item>
+    <!-- PIN-pad BankID 7.48: полоса сетки #D2D1CD проглядывает в зазорах 1px между клавишами -->
+    <style name="BankIdNumpadRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">0dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginBottom">1px</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+
+    <style name="BankIdKey">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:layout_marginEnd">1px</item>
+        <item name="android:background">@drawable/bankid_numpad_key_bg</item>
+        <item name="android:gravity">center</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:hapticFeedbackEnabled">true</item>
+    </style>
+
+    <style name="BankIdKeyDigit">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">@color/bankid_numpad_digit</item>
+        <item name="android:textSize">18sp</item>
+        <item name="android:importantForAccessibility">no</item>
     </style>
 </resources>

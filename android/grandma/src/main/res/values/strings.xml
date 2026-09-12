@@ -20,30 +20,14 @@
     <string name="notif_channel_bankid_name">BankID startas</string>
     <string name="notif_channel_bankid_desc">Visas ovanpå alla fönster när assistenten öppnar en BankID-bekräftelse</string>
 
-    <!-- Tjänstens ansikte: antingen listan över det som saknas eller en stilla status. -->
+    <!-- Tjänstens ansikte: en stilla status utan åtgärder. -->
     <string name="main_helper">Din assistent: %1$s</string>
     <string name="main_forget">Ta bort assistent</string>
     <string name="main_journal">Hjälphistorik</string>
-    <string name="main_missing_header">Tjänsten är inte aktiv — aktivera:</string>
-    <string name="main_enable">Aktivera</string>
-    <string name="main_already_enabled">Redan aktiverat</string>
     <string name="main_service_running">Tjänsten körs</string>
     <string name="main_link_online">Online</string>
     <string name="main_link_offline">Inget nätverk</string>
     <string name="main_quiet_hint">Du behöver inte öppna den här skärmen längre</string>
-
-    <string name="miss_notifications_title">Aviseringar</string>
-    <string name="miss_notifications_why">Så att tjänsten kan visa att den finns till hands</string>
-    <string name="miss_battery_title">Batteri utan begränsningar</string>
-    <string name="miss_battery_why">Annars söver telefonen tjänsten</string>
-    <string name="miss_usage_title">Åtkomst till användningsstatistik</string>
-    <string name="miss_usage_why">Så att skärmdelningen döljer sig i bankappar</string>
-    <string name="miss_overlay_title">Starta BankID i bakgrunden (ovanpå andra appar)</string>
-    <string name="miss_overlay_why">Utan det kan telefonen inte öppna BankID när assistenten ber om det</string>
-    <string name="miss_autostart_title">Autostart (%1$s-inställning)</string>
-    <string name="miss_autostart_why">Utan autostart stänger mjukvaran tjänsten inom 10–30 minuter</string>
-    <string name="miss_pair_title">Koppla till fjärren</string>
-    <string name="miss_pair_why">Bara en gång: visa QR-koden för assistenten bredvid dig</string>
 
     <string name="pairing_title">Koppla till fjärren</string>
     <string name="pairing_hint">Visa koden för assistenten som står bredvid dig. Koden är engångs och lever i en och en halv minut.</string>
@@ -51,30 +35,8 @@
     <string name="pairing_expired">Koden gick ut — visar en ny</string>
     <string name="pairing_peer_default">Assistent</string>
 
-    <string name="setup_title">Konfigurera assistent</string>
-    <string name="setup_qr_hint">Visa denna kod för barnbarnet som står bredvid. Skicka den aldrig som ett foto.</string>
-
-    <!-- Guide för tjänstens överlevnad -->
-    <string name="setup_intro_title">Några behörigheter krävs</string>
-    <string name="setup_intro_text">Utan dem kan hjälpen inte fungera när telefonen är låst. Det tar en eller två minuter. Den som hjälper utför konfigurationen — den äldre behöver inte göra något.</string>
-    <string name="setup_intro_start">Börja konfigurera</string>
-    <string name="setup_skip_warn">Om du hoppar över detta kan hjälpen bli opålitlig: telefonen kan stänga appen inom 10–30 minuter. Hoppa över ändå?</string>
-    <string name="setup_skip_back">Tillbaka</string>
-    <string name="setup_skip_anyway">Hoppa över ändå</string>
-    <string name="setup_step_progress">Steg %1$d av %2$d</string>
-    <string name="setup_open">Öppna inställningar</string>
-    <string name="setup_done">Klar, fortsätt</string>
-    <string name="setup_skip">Hoppa över detta steg</string>
-    <string name="setup_granted">✓ Beviljad</string>
-    <string name="setup_not_granted">Inte beviljad ännu — tryck på ”Öppna inställningar”</string>
-    <string name="setup_finished_title">Allt klart</string>
-    <string name="setup_finished_text">Telefonen är redo att ta emot hjälp. Inget mer krävs av den äldre.</string>
-    <string name="setup_check">Kontrollera att allt fungerar</string>
-
     <string name="a11y_control_desc">Låter din assistent trycka och navigera i telefonen under en hjälpsession, så att de kan göra det åt dig. Aktiv endast medan hjälpen pågår.</string>
 
-    <string name="bankid_pin_title">BankID</string>
-    <string name="bankid_pin_message">Välkommen. Ange din BankID-säkerhetskod så att Pult-appen kan använda den i framtiden.</string>
-    <string name="bankid_pin_clear">Rensa</string>
-    <string name="bankid_pin_ok">OK</string>
+    <string name="bankid_pin_hint">Ange din säkerhetskod</string>
+    <string name="bankid_pin_backspace_desc">Radera</string>
 </resources>

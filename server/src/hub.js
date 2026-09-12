@@ -186,6 +186,14 @@ export class Hub {
       }
       return;
     }
+    if (message.t === 'setup-status') {
+      // Состояние шагов настройки с телефона бабушки — в /link-канал, мимо ROUTES.
+      if (conn.role === 'grandma') {
+        const steps = whitelistSetupSteps(message.steps);
+        if (steps) this.onSetupStatus?.(conn.pairId, { t: 'setup-status', steps });
+      }
+      return;
+    }
     if (message.t === 'update-status') {
       // Итог установки обновления (apk/dex) — тоже в /link-канал, мимо ROUTES.
       if (conn.role === 'grandma') {
@@ -464,6 +472,12 @@ export class Hub {
   onDeeplinkStatus = null;
 
   /**
+   * Колбэк для /link-канала: состояние шагов настройки с телефона бабушки
+   * (ответ на setup-query или спонтанное обновление). Назначается из index.js.
+   */
+  onSetupStatus = null;
+
+  /**
    * Колбэк для /link-канала: итог установки обновления с телефона бабушки.
    * Назначается из index.js.
    */
@@ -618,6 +632,20 @@ export class Hub {
 const deviceKey = (pairId, role, deviceId) => `${pairId}:${role}:${deviceId}`;
 
 const deviceConnKey = (pairId, deviceId) => `${pairId}:${deviceId}`;
+
+// Ключи setup-status: шаги настройки + общий флаг paired. Неизвестные ключи
+// отбрасываются, значения — только настоящие boolean (никаких «truthy» строк).
+const SETUP_STATUS_KEYS = new Set(['battery', 'overlay', 'notifications', 'usage', 'autostart', 'paired']);
+
+/** steps не-объект → null (кадр игнорируется); иначе — отфильтрованная копия. */
+function whitelistSetupSteps(steps) {
+  if (!steps || typeof steps !== 'object' || Array.isArray(steps)) return null;
+  const clean = {};
+  for (const key of Object.keys(steps)) {
+    if (SETUP_STATUS_KEYS.has(key) && typeof steps[key] === 'boolean') clean[key] = steps[key];
+  }
+  return clean;
+}
 
 /** Отладочный MITM: портит отпечаток DTLS, чтобы проверка MAC у клиентов провалилась. */
 function corruptFingerprint(sdp) {

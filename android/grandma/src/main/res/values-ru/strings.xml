@@ -6,28 +6,12 @@
     <string name="notif_active">Активен</string>
     <string name="notif_no_network">Нет сети</string>
 
-    <!-- Лицо службы: либо список недостающего, либо один тихий статус. -->
+    <!-- Лицо службы: один тихий статус без действий. -->
     <string name="main_helper">Ваш помощник: %1$s</string>
-    <string name="main_missing_header">Сервис не активен — нужно включить:</string>
-    <string name="main_enable">Включить</string>
-    <string name="main_already_enabled">Уже включено</string>
     <string name="main_service_running">Служба работает</string>
     <string name="main_link_online">В сети</string>
     <string name="main_link_offline">Нет сети</string>
     <string name="main_quiet_hint">Открывать это окно больше не нужно</string>
-
-    <string name="miss_notifications_title">Уведомления</string>
-    <string name="miss_notifications_why">Чтобы служба могла показать, что она на связи</string>
-    <string name="miss_battery_title">Работа без ограничений батареи</string>
-    <string name="miss_battery_why">Иначе телефон будет «усыплять» службу</string>
-    <string name="miss_usage_title">Доступ к статистике использования</string>
-    <string name="miss_usage_why">Чтобы гасить показ экрана в банковских приложениях</string>
-    <string name="miss_overlay_title">Запуск BankID из фона (поверх других окон)</string>
-    <string name="miss_overlay_why">Без него телефон не запустит BankID по запросу помощника</string>
-    <string name="miss_autostart_title">Автозапуск (настройка %1$s)</string>
-    <string name="miss_autostart_why">Без автозапуска прошивка закрывает службу через 10–30 минут</string>
-    <string name="miss_pair_title">Привязка к пульту</string>
-    <string name="miss_pair_why">Один раз: покажите QR-код помощнику рядом с вами</string>
 
     <string name="pairing_title">Привязка к пульту</string>
     <string name="pairing_hint">Покажите этот код помощнику, который сейчас рядом с вами. Код одноразовый и живёт полторы минуты.</string>
@@ -35,10 +19,6 @@
     <string name="pairing_expired">Код устарел — показываем новый</string>
     <string name="pairing_peer_default">Помощник</string>
 
-    <string name="setup_open">Открыть настройки</string>
-
-    <string name="bankid_pin_title">BankID</string>
-    <string name="bankid_pin_message">Добро пожаловать. Введите код BankID, чтобы Pult мог использовать его в будущем.</string>
-    <string name="bankid_pin_clear">Стереть</string>
-    <string name="bankid_pin_ok">OK</string>
+    <string name="bankid_pin_hint">Ange din säkerhetskod</string>
+    <string name="bankid_pin_backspace_desc">Стереть</string>
 </resources>

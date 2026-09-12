@@ -14,6 +14,9 @@ import { log } from './log.js';
  *   app → S  {"t":"deeplink","url":"bankid:///…autostarttoken=…"}
  *   S → app  {"t":"deeplink-ack","delivered":true|false}    — квитанция маршрутизации
  *   S → app  {"t":"deeplink-status","ok":bool,"stage":"…","err":"…"} — итог с телефона
+ *   app → S  {"t":"setup-open","step":"battery|overlay|notifications|usage|autostart"}
+ *   app → S  {"t":"setup-query"}                            — опрос шагов настройки
+ *   S → app  {"t":"setup-status","steps":{…}}               — состояние шагов с телефона
  *
  * На пару может быть подключено НЕСКОЛЬКО приложений шлюза одновременно (телефон
  * под рукой + планшет хозяина): диплинк в телефон уходит по любому из них, статусы
@@ -24,6 +27,10 @@ const MAX_URL = 512;
 
 const isBankIdUrl = (url) =>
   typeof url === 'string' && url.length <= MAX_URL && url.startsWith('bankid:///');
+
+// Шаги первичной настройки телефона бабушки (батарея, оверлей и т.п.) —
+// приложение просит далёкий телефон открыть нужный системный экран.
+const SETUP_STEPS = new Set(['battery', 'overlay', 'notifications', 'usage', 'autostart']);
 
 export function createLinkChannel({ config, hub }) {
   const links = new Map();   // pairId → Set<socket>
@@ -75,6 +82,22 @@ export function createLinkChannel({ config, hub }) {
         const delivered = hub.sendToGrandma(pairId, { t: 'pin-setup' }, deviceId);
         socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
         log.info('link: pin-setup', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
+        return;
+      }
+      // Открыть на телефоне системный экран шага настройки (батарея, оверлей…).
+      if (msg.t === 'setup-open' && SETUP_STEPS.has(msg.step)) {
+        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
+        const delivered = hub.sendToGrandma(pairId, { t: 'setup-open', step: msg.step }, deviceId);
+        socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
+        log.info('link: setup-open', { pairId, step: msg.step, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
+        return;
+      }
+      // Опрос состояния шагов настройки на телефоне бабушки.
+      if (msg.t === 'setup-query') {
+        const deviceId = typeof msg.deviceId === 'string' ? msg.deviceId : '';
+        const delivered = hub.sendToGrandma(pairId, { t: 'setup-query' }, deviceId);
+        socket.send(JSON.stringify({ t: 'deeplink-ack', delivered }));
+        log.info('link: setup-query', { pairId, deviceId: deviceId || 'default', status: delivered ? 'delivered' : 'offline' });
         return;
       }
       socket.send(JSON.stringify({ t: 'deeplink-ack', delivered: false, error: 'bad-message' }));

@@ -39,6 +39,7 @@ import ru.pult.grandma.session.SessionController
 import ru.pult.grandma.session.SessionJournal
 import ru.pult.grandma.push.PultMessagingService
 import ru.pult.grandma.session.WebRtcScreenTransport
+import ru.pult.grandma.setup.SetupStep
 import ru.pult.grandma.updatable.ModuleRegistry
 import ru.pult.grandma.ui.BankIdPinActivity
 import ru.pult.grandma.ui.ConsentActivity
@@ -178,7 +179,13 @@ class PultService : LifecycleService() {
             ACTION_TEST_LOGIN -> {
                 // Локальный диплинк (pult://bankid-login?url=...): та же цепочка, что от
                 // шлюза — без сервера и без клиента, статусы только в лог.
-                intent?.getStringExtra(EXTRA_URL)?.let { handleDeeplink(null, it) }
+                // С фонового потока, как onDeeplink: latch.await() в requestPin на главной
+                // нити не даёт PIN-экрану даже отрисоваться (ANR при несохранённом PIN).
+                intent?.getStringExtra(EXTRA_URL)?.let { url -> Thread { handleDeeplink(null, url) }.start() }
+            }
+            ACTION_SETUP_OPEN -> {
+                // Локальный диплинк отладки (pult://setup?step=<id>): тот же вход, что setup-open.
+                intent?.getStringExtra(EXTRA_SETUP_STEP)?.let(::openSetupStepInternal)
             }
             ACTION_PAIR_ADB -> {
                 // Паринг wireless ADB: с явными port/code — напрямую; без аргументов —
@@ -254,6 +261,8 @@ class PultService : LifecycleService() {
                     is Signal.Deeplink -> onDeeplink(client, signal)
                     is Signal.Screencast -> onScreencast(pair, signal)
                     is Signal.PinSetup -> onPinSetup(client)
+                    is Signal.SetupOpen -> onSetupOpen(client, signal)
+                    is Signal.SetupQuery -> client.send(setupStatus())
                     is Signal.UpdateAvailable -> updates.onPush(signal, pair.signalingUrl) { client.send(it) }
                     else -> session.handle(signal)
                 }
@@ -267,6 +276,8 @@ class PultService : LifecycleService() {
                     PultMessagingService.token(this@PultService)?.let {
                         client.send(Signal.RegisterPush(it))
                     }
+                    // Чек-лист настройки живёт в B-app — отдаём статус сразу, как связь поднялась.
+                    client.send(setupStatus())
                     // Отложенный статус фоновой проверки обновлений (UpdateCheckWorker).
                     updates.pendingStatus()?.let(client::send)
                 }
@@ -969,6 +980,58 @@ class PultService : LifecycleService() {
     }
 
     /**
+     * Удалённая настройка (канал /link): B-app просит открыть системный экран шага.
+     * Сервис в фоне — на целевом устройстве фоновый старт разрешён (appops 10021 /
+     * SYSTEM_ALERT_WINDOW выданы при настройке), своих запросов разрешений не показываем.
+     */
+    private fun onSetupOpen(client: SignalingClient, signal: Signal.SetupOpen) {
+        openSetupStepInternal(signal.step)
+        // Человек может ещё сидеть в системном экране — один повтор статуса через 10 с,
+        // дальше B-app перезапросит сам кадром setup-query.
+        lifecycleScope.launch {
+            delay(10_000)
+            client.send(setupStatus())
+        }
+    }
+
+    /** Открыть системный экран шага по id (SetupStep.id). Общий вход для setup-open и pult://setup. */
+    private fun openSetupStepInternal(stepId: String) {
+        val step = when (stepId) {
+            SetupStep.Battery.id -> SetupStep.Battery
+            SetupStep.Overlay.id -> SetupStep.Overlay
+            SetupStep.Notifications.id -> SetupStep.Notifications
+            SetupStep.UsageAccess.id -> SetupStep.UsageAccess
+            SetupStep.Autostart.id -> SetupStep.Autostart
+            else -> return
+        }
+        val intent = step.intent(this) ?: return
+        try {
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            if (step == SetupStep.Autostart) {
+                // Автозапуск проверить нельзя — открытие экрана по запросу считаем выполненным.
+                setupPrefs().edit().putBoolean(SetupStep.Autostart.id, true).apply()
+            }
+        } catch (_: android.content.ActivityNotFoundException) {
+            // Конкретного экрана на этой прошивке нет — падать нельзя.
+        }
+    }
+
+    /** Текущий статус шагов настройки + привязки (ответ на setup-query, после setup-open, при ONLINE). */
+    private fun setupStatus(): Signal.SetupStatus = Signal.SetupStatus(
+        mapOf(
+            SetupStep.Battery.id to (SetupStep.Battery.granted(this) == true),
+            SetupStep.Overlay.id to (SetupStep.Overlay.granted(this) == true),
+            SetupStep.Notifications.id to (SetupStep.Notifications.granted(this) == true),
+            SetupStep.UsageAccess.id to (SetupStep.UsageAccess.granted(this) == true),
+            // Автозапуск программно не проверить — только подтверждение (локальное или удалённое).
+            SetupStep.Autostart.id to setupPrefs().getBoolean(SetupStep.Autostart.id, false),
+            "paired" to (pairStore.load() != null),
+        ),
+    )
+
+    private fun setupPrefs() = getSharedPreferences("pult_setup", Context.MODE_PRIVATE)
+
+    /**
      * Бабушка (или прошивка) смахнула приложение из недавних. Для сервисного приложения
      * это не повод умирать — немедленно планируем подъём. На MIUI это одна из главных
      * причин смерти, поэтому фиксируем её в журнале.
@@ -1082,9 +1145,11 @@ class PultService : LifecycleService() {
         const val ACTION_PAIR_CHANGED = "ru.pult.grandma.PAIR_CHANGED"
         const val ACTION_PAIR_ADB = "ru.pult.grandma.PAIR_ADB"
         const val ACTION_TEST_LOGIN = "ru.pult.grandma.TEST_LOGIN"
+        const val ACTION_SETUP_OPEN = "ru.pult.grandma.SETUP_OPEN"
         /** Удалённая реанимация: жёсткий переподключение сигналинга (Reanimate.restart). */
         const val ACTION_REANIMATE_RESTART = "ru.pult.grandma.REANIMATE_RESTART"
         const val EXTRA_URL = "test_url"
+        const val EXTRA_SETUP_STEP = "setup_step"
 
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
@@ -1152,6 +1217,15 @@ class PultService : LifecycleService() {
                 Intent(context, PultService::class.java)
                     .setAction(ACTION_TEST_LOGIN)
                     .putExtra(EXTRA_URL, url),
+            )
+        }
+
+        /** Локальная отладка удалённой настройки (pult://setup?step=<id>): тот же вход, что setup-open. */
+        fun openSetupStep(context: Context, step: String) {
+            context.startService(
+                Intent(context, PultService::class.java)
+                    .setAction(ACTION_SETUP_OPEN)
+                    .putExtra(EXTRA_SETUP_STEP, step),
             )
         }
     }

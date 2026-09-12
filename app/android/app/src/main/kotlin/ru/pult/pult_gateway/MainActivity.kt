@@ -145,6 +145,7 @@ class MainActivity : FlutterActivity() {
                         mapOf(
                             "online" to prefs.getBoolean("linkOnline", false),
                             "lastStatus" to (prefs.getString("lastStatus", "") ?: ""),
+                            "lastSetupStatus" to (prefs.getString("lastSetupStatus", "") ?: ""),
                             // Нативный туннель (в сервисе, не в движке).
                             "tunnelOnline" to prefs.getBoolean("flutter.tunnelOnline", false),
                             "tunnelStreams" to prefs.getInt("flutter.tunnelStreams", 0),
@@ -181,6 +182,25 @@ class MainActivity : FlutterActivity() {
                 // (+ skärmdelning) — вводит человек у телефона, итог вернётся статусом.
                 "sendPinSetup" -> {
                     KeepAliveService.sendJson(this, JSONObject().put("t", "pin-setup").toString())
+                    result.success(true)
+                }
+                // Чек-лист активации: открыть системный экран настройки на A-app.
+                "sendSetupOpen" -> {
+                    val step = call.argument<String>("step")
+                    if (step != null) {
+                        val payload = JSONObject().put("t", "setup-open").put("step", step)
+                        prefs().getString("flutter.selectedDeviceId", null)
+                            ?.let { payload.put("deviceId", it) }
+                        KeepAliveService.sendJson(this, payload.toString())
+                    }
+                    result.success(true)
+                }
+                // Чек-лист активации: запросить свежий setup-status у A-app.
+                "sendSetupQuery" -> {
+                    val payload = JSONObject().put("t", "setup-query")
+                    prefs().getString("flutter.selectedDeviceId", null)
+                        ?.let { payload.put("deviceId", it) }
+                    KeepAliveService.sendJson(this, payload.toString())
                     result.success(true)
                 }
                 else -> result.notImplemented()

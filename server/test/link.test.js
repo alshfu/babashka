@@ -132,3 +132,116 @@ test('/link: update-status от роли helper игнорируется', async
   helper.send({ t: 'update-status', kind: 'apk', version: '1.2.3', ok: true });
   assert.deepEqual(await app.silentFor(150), []);
 });
+
+test('/link: setup-open доезжает до телефона бабушки', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-open');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  app.send({ t: 'setup-open', step: 'battery' });
+
+  const ack = await app.next('deeplink-ack');
+  assert.equal(ack.delivered, true);
+
+  const onPhone = await grandma.next('setup-open');
+  assert.deepEqual(onPhone, { t: 'setup-open', step: 'battery' });
+});
+
+test('/link: setup-open с deviceId адресуется выбранной A-app', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-open-dev');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma', deviceId: 'redmi-1' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  app.send({ t: 'setup-open', step: 'overlay', deviceId: 'redmi-1' });
+
+  const ack = await app.next('deeplink-ack');
+  assert.equal(ack.delivered, true);
+
+  const onPhone = await grandma.next('setup-open');
+  assert.deepEqual(onPhone, { t: 'setup-open', step: 'overlay' });
+});
+
+test('/link: setup-open с неизвестным step отклоняется как bad-message', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-open-bad');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  app.send({ t: 'setup-open', step: 'root-access' });
+
+  const ack = await app.next('deeplink-ack');
+  assert.deepEqual(ack, { t: 'deeplink-ack', delivered: false, error: 'bad-message' });
+  assert.deepEqual(await grandma.silentFor(150), []);
+});
+
+test('/link: setup-query доезжает до телефона бабушки', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-query');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  app.send({ t: 'setup-query' });
+
+  const ack = await app.next('deeplink-ack');
+  assert.equal(ack.delivered, true);
+
+  const onPhone = await grandma.next('setup-query');
+  assert.deepEqual(onPhone, { t: 'setup-query' });
+});
+
+test('/link: setup-status с телефона рассылается приложениям с отбеленными шагами', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-status');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  grandma.send({
+    t: 'setup-status',
+    steps: {
+      battery: true,
+      overlay: false,
+      paired: true,
+      usage: 'yes',          // не boolean — отбрасываем
+      'evil-key': true,      // неизвестный ключ — отбрасываем
+    },
+  });
+
+  const status = await app.next('setup-status');
+  assert.deepEqual(status, { t: 'setup-status', steps: { battery: true, overlay: false, paired: true } });
+});
+
+test('/link: setup-status без объекта steps игнорируется', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-status-garbage');
+
+  const grandma = await TestClient.connect(url);
+  await grandma.hello({ pairId: pair, role: 'grandma' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  grandma.send({ t: 'setup-status', steps: 'all-good' });
+  grandma.send({ t: 'setup-status' });
+  assert.deepEqual(await app.silentFor(150), []);
+});
+
+test('/link: setup-status от роли helper игнорируется', async (t) => {
+  const { port, url } = await start(t);
+  const pair = pairId('setup-status-helper');
+  const helper = await TestClient.connect(url);
+  await helper.hello({ pairId: pair, role: 'helper' });
+
+  const app = await TestClient.connect(linkUrl(port, pair));
+  helper.send({ t: 'setup-status', steps: { battery: true } });
+  assert.deepEqual(await app.silentFor(150), []);
+});

@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bankid_background">#0A2873</color>
-    <color name="bankid_text">#FFFFFF</color>
-    <color name="bankid_key_background">#FFFFFF</color>
-    <color name="bankid_key_text">#0A2873</color>
+    <!-- Палитра PIN-pad BankID 7.48 (light), извлечена из com.bankid.bus APK -->
+    <color name="bankid_screen_background">#FFFFFF</color>
+    <color name="bankid_logo_color">#183E4F</color>
+    <color name="bankid_numpad_grid">#D2D1CD</color>
+    <color name="bankid_numpad_key">#E8E7E3</color>
+    <color name="bankid_numpad_key_pressed">#D2D1CD</color>
+    <color name="bankid_numpad_digit">#0B2028</color>
+    <color name="bankid_field_hint">#800B2028</color>
 </resources>

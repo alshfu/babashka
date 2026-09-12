@@ -36,6 +36,8 @@ export async function createApp(overrides = {}) {
   // Шлюз BankID-диплинков: статусы с телефона бабушки уходят в /link-канал.
   const linkChannel = createLinkChannel({ config, hub });
   hub.onDeeplinkStatus = (pairId, status) => linkChannel.notifyStatus(pairId, status);
+  // Состояние шагов настройки (батарея/оверлей/…) с телефона — туда же, в /link-канал.
+  hub.onSetupStatus = (pairId, status) => linkChannel.notify(pairId, status);
   // Итоги установки обновлений (apk/dex) — туда же, в /link-канал.
   // Логируем: OTA на далёком телефоне иначе «слепая» — не видно ни download-failed,
   // ни sha256-mismatch, ни already-installed (поймано 2026-09-12).

@@ -34,6 +34,9 @@ class DartLinkService {
   /// Сырая строка последнего статуса — то, что на Android лежит в prefs lastStatus.
   String lastStatusRaw = '';
 
+  /// Сырая строка последнего setup-status — аналог prefs lastSetupStatus на Android.
+  String lastSetupStatusRaw = '';
+
   /// Очередь диплинков, посланных до коннекта (как pendingUrl у сервиса).
   String? _pendingUrl;
   String? _pendingDeviceId;
@@ -41,6 +44,10 @@ class DartLinkService {
   /// События статуса для UI (аналог broadcast ACTION_STATUS → 'changed').
   final _events = StreamController<LinkStatusEvent>.broadcast();
   Stream<LinkStatusEvent> get events => _events.stream;
+
+  /// События setup-status: свежая карта шагов активации от A-app.
+  final _setupEvents = StreamController<Map<String, bool>>.broadcast();
+  Stream<Map<String, bool>> get setupEvents => _setupEvents.stream;
 
   bool get online => _ws != null;
 
@@ -86,6 +93,20 @@ class DartLinkService {
   /// deeplink-status со stage=pin-saved|pin-cancelled.
   void sendPinSetup() {
     if (online) _send(jsonEncode({'t': 'pin-setup'}));
+  }
+
+  /// Открыть экран настройки (шаг активации) на выбранном A-app-устройстве.
+  void sendSetupOpen(String step, String? deviceId) {
+    if (online) {
+      _send(jsonEncode({'t': 'setup-open', 'step': step, if (deviceId != null) 'deviceId': deviceId}));
+    }
+  }
+
+  /// Запросить свежий статус активации у выбранного A-app-устройства.
+  void sendSetupQuery(String? deviceId) {
+    if (online) {
+      _send(jsonEncode({'t': 'setup-query', if (deviceId != null) 'deviceId': deviceId}));
+    }
   }
 
   void clearStatus() {
@@ -154,6 +175,13 @@ class DartLinkService {
             'ok': msg['ok'] == true,
             'err': msg['err'] ?? '',
           }));
+        case 'setup-status':
+          final steps = msg['steps'];
+          if (steps is Map) {
+            _publishSetupStatus(jsonEncode({
+              'steps': steps.map((k, v) => MapEntry(k.toString(), v == true)),
+            }));
+          }
       }
     } catch (_) {}
   }
@@ -161,6 +189,16 @@ class DartLinkService {
   void _publishStatus(String raw) {
     lastStatusRaw = raw;
     _events.add(LinkStatusEvent(raw));
+  }
+
+  void _publishSetupStatus(String raw) {
+    lastSetupStatusRaw = raw;
+    try {
+      final steps = (jsonDecode(raw) as Map<String, dynamic>)['steps'];
+      if (steps is Map) {
+        _setupEvents.add(steps.map((k, v) => MapEntry(k.toString(), v == true)));
+      }
+    } catch (_) {}
   }
 
   void _send(String payload) {
@@ -207,5 +245,6 @@ class DartLinkService {
     _disposed = true;
     await _closeSocket();
     await _events.close();
+    await _setupEvents.close();
   }
 }

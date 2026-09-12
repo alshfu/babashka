@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон клавиши цифры: аналог numpad_white_selector из com.bankid.bus 7.48.0 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true" android:drawable="@color/bankid_numpad_key_pressed" />
+    <item android:drawable="@color/bankid_numpad_key" />
+</selector>

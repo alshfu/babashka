@@ -13,11 +13,16 @@ aldrig tredje part åtkomst. Se `AGENTS.md` för projektets järnregler.
 | Namn | Vad | Paket | Källkod | Enhet |
 |---|---|---|---|---|
 | **A-app** | Enhetsappen som står kvar i Sverige | `se.pult.app` | `android/grandma/` (Kotlin) | Redmi |
-| **B-app** | Operatörsappen som styr | `com.bankid.bus` | `app/` (Flutter) | Note 10 |
+| **B-app** | Operatörsappen som styr | `com.bankid.bus` | `app/` (Flutter) | Note 10; under utveckling — Mac-emulatorn |
 | **Server** | Relä/hub på VPS | — | `server/` (Node.js) | `85.190.98.57` |
 
 - En **A-app** kan styras från en **B-app**.
 - En **B-app** kan styra **flera A-appar**.
+- **Vid utveckling:** B-appen installeras på emulatorn (`moderator_test`,
+  adb `emulator-5554`) — hela operatörs-UI:t fungerar därifrån mot den riktiga
+  Redmi-enheten. A-appen — bara på Redmi. Obs: B-appen bär paketet
+  `com.bankid.bus` och ersätter därför äkta BankID på emulatorn
+  (avinstallera först: `adb uninstall com.bankid.bus`).
 
 ---
 
@@ -52,17 +57,25 @@ inget innehåll — bara relä och metadatajournal (90 dagars rotation).
     A-appen, så Note 10 får **samma publika IP som A-appen** i Sverige.
     Knappen »Kontrollera publik IP« verifierar utgående IP.
   - **Skärmsändning** — låglatensvy av A-appens skärm med touch tillbaka.
+  - **Aktiveringschecklista (»Aktivering«)** — status för A-appens
+    inställningssteg (notiser, batteri, användningsåtkomst, överlägg, autostart,
+    parkoppling) med en »Öppna«-knapp per rad: ett tryck skickar ramen
+    `setup-open` och A-appen öppnar rätt systeminställningsskärm. Frågesvar:
+    `setup-query` / `setup-status`.
 - Foreground service (KeepAliveService) håller WebSocket-kanalen vid liv.
 
 ## 4. A-appen (enhetsapp, Redmi i Sverige)
 
-A-appen är en **tjänst utan skärm** i driftläget, med exakt två skärmar:
+A-appen är en **tjänst utan knappar** i driftläget. Skärmar:
 
 1. **PIN-skärmen (`BankIdPinActivity`)** — ser ut 1:1 som BankIDs PIN-skärm.
-   Texten välkomnar användaren att skriva in sin BankID-säkerhetskod så att
-   Pult-appen kan använda den i framtiden. Koden sparas **endast här**, lokalt
+   Zero-click: sjätte siffran sparar koden och stänger skärmen, ingen
+   bekräftelseknapp finns. Koden sparas **endast här**, lokalt
    och krypterat (`PinStorage`), och lämnar aldrig enheten.
 2. **Parnings-/statusskärmen (`PairingActivity`)** — koppling mot servern.
+3. **Tyst status (`MainActivity`)** — bara tjänstens och kanalens status, inga
+   knappar. Inställning (batteri/överlägg/notiser/…) sköts på distans från
+   B-appen via /link-ramarna `setup-open` / `setup-query` / `setup-status`.
 
 Övriga komponenter: `PultService` (/ws-agent + /tunnel), `BankIdAgent`
 (PIN-scenariot), `LanShell`/`AdbShell` (skal åt sig själv), `RemoteControlService`
@@ -81,7 +94,7 @@ Adress: **`wss://85.190.98.57.sslip.io:8445`** (HTTPS/WSS via Caddy + Let's Encr
 | Kanal | Funktion |
 |---|---|
 | `/ws` | Signalering (par, närvaro, heartbeat) |
-| `/link` | Dipplänk B-app → A-app + signeringsstatus tillbaka |
+| `/link` | Dipplänk B-app → A-app + signeringsstatus tillbaka; inställningsramar `setup-open` / `setup-query` / `setup-status` |
 | `/tunnel` | Multiplexade TCP-flöden (B-appens webbtrafik ut via A-app) |
 | `/lowlat` | H.264-skärmrelä |
 | `/agent` | Kommandokanal (AGENT_TOKEN) |

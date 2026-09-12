@@ -82,6 +82,7 @@ class LinkBridge extends ChangeNotifier {
   DartLinkService? _dart;
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _appLinkSub;
+  StreamSubscription<Map<String, bool>>? _setupSub;
   // iOS/общий fallback: встроенный CONNECT-прокси на 0.0.0.0:8877 → /tunnel
   // (туннель до шведского IP без системного прокси, см. tunnel_proxy.dart).
   TunnelProxyService? _tunnelProxy;
@@ -100,6 +101,9 @@ class LinkBridge extends ChangeNotifier {
 
   bool proxyOn = false;
   bool proxyWanted = true;
+  // Статус активации A-app (setup-status): null — ответа ещё не было
+  // (устройство может быть на старой сборке и не отвечать вовсе).
+  Map<String, bool>? setupSteps;
   // Туннель активен; SSID для iOS-профиля — только ввод вручную (iOS не отдаёт
   // SSID без entitlement).
   String proxySsid = '';
@@ -122,6 +126,10 @@ class LinkBridge extends ChangeNotifier {
       _dart = dart;
       dart.events.listen((event) {
         _applyStatusRaw(event.rawJson);
+        notifyListeners();
+      });
+      _setupSub = dart.setupEvents.listen((steps) {
+        setupSteps = steps;
         notifyListeners();
       });
       // Перехват bankid:// от Swedbank: iOS доставляет схему, заявленную в
@@ -198,6 +206,7 @@ class LinkBridge extends ChangeNotifier {
       tunnelOnline = false;
       tunnelStreams = 0;
       _applyStatusRaw(dart.lastStatusRaw);
+      _applySetupStatusRaw(dart.lastSetupStatusRaw);
     } else {
       try {
         final state = await _ch.invokeMethod<Map<dynamic, dynamic>>('getState');
@@ -205,6 +214,7 @@ class LinkBridge extends ChangeNotifier {
         tunnelOnline = state?['tunnelOnline'] == true;
         tunnelStreams = (state?['tunnelStreams'] as int?) ?? 0;
         _applyStatusRaw((state?['lastStatus'] as String?) ?? '');
+        _applySetupStatusRaw((state?['lastSetupStatus'] as String?) ?? '');
       } catch (_) {}
     }
     // Туннель умер — прокси недействителен; туннель поднялся — вернуть прокси,
@@ -283,6 +293,40 @@ class LinkBridge extends ChangeNotifier {
     }
     try {
       await _ch.invokeMethod<void>('sendPinSetup');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Чек-лист активации: попросить A-app открыть системный экран настройки
+  /// (battery / overlay / notifications / usage / autostart).
+  Future<bool> sendSetupOpen(String step) async {
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendSetupOpen(step, selectedDeviceId);
+      return true;
+    }
+    try {
+      await _ch.invokeMethod<void>('sendSetupOpen', {'step': step});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Чек-лист активации: запросить свежий setup-status у A-app.
+  /// Ответ придёт кадром setup-status → [setupSteps].
+  Future<bool> sendSetupQuery() async {
+    final dart = _dart;
+    if (dart != null) {
+      if (!dart.online) return false;
+      dart.sendSetupQuery(selectedDeviceId);
+      return true;
+    }
+    try {
+      await _ch.invokeMethod<void>('sendSetupQuery');
       return true;
     } catch (_) {
       return false;
@@ -545,6 +589,18 @@ class LinkBridge extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Разбор сырого lastSetupStatus (тот же JSON, что публикует нативный слой
+  /// Android в prefs 'lastSetupStatus': {"steps": {"battery": true, …}}).
+  void _applySetupStatusRaw(String raw) {
+    if (raw.isEmpty) return;
+    try {
+      final steps = (jsonDecode(raw) as Map<String, dynamic>)['steps'];
+      if (steps is Map) {
+        setupSteps = steps.map((k, v) => MapEntry(k.toString(), v == true));
+      }
+    } catch (_) {}
+  }
+
   /// bankid:// от Swedbank (через app_links) → в канал /link на выбранную A-app.
   /// Нормализация — как normalizeBankIdUrl() в MainActivity.kt.
   void _onAppLink(Uri uri) {
@@ -566,6 +622,7 @@ class LinkBridge extends ChangeNotifier {
   @override
   void dispose() {
     _appLinkSub?.cancel();
+    unawaited(_setupSub?.cancel());
     unawaited(_tunnelProxy?.stop());
     unawaited(_dart?.dispose());
     super.dispose();
@@ -775,6 +832,13 @@ class _DevicePageState extends State<DevicePage> {
   bool _busy = false;
 
   LinkBridge get client => widget.client;
+
+  @override
+  void initState() {
+    super.initState();
+    // Свежий статус активации при открытии страницы; ответ придёт setup-status.
+    unawaited(client.sendSetupQuery());
+  }
 
   Future<void> _toggleScreencast() async {
     if (_busy) return;
@@ -988,6 +1052,8 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ),
               ],
+              const SizedBox(height: 16),
+              _activationCard(),
               if (label.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _signStatusCard(label, color),
@@ -1152,6 +1218,85 @@ class _DevicePageState extends State<DevicePage> {
           ),
         ),
       );
+
+  /// Чек-лист активации A-app: оператор открывает системные экраны настроек
+  /// на далёком устройстве по одной кнопке; статусы приходят setup-status-кадром.
+  /// Без ответа (старая сборка A-app) — все строки в состоянии «?».
+  Widget _activationCard() {
+    final hasData = client.setupSteps != null;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Aktivering', style: TextStyle(fontSize: 16)),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Uppdatera',
+                  onPressed: () => client.sendSetupQuery(),
+                ),
+              ],
+            ),
+            if (!hasData)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Ingen status ännu — enheten kan köra en äldre version.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                ),
+              ),
+            _setupRow('Notiser', 'notifications'),
+            _setupRow('Batterioptimering', 'battery'),
+            _setupRow('Användningsåtkomst', 'usage'),
+            _setupRow('Visa över andra appar', 'overlay'),
+            _setupRow('Autostart', 'autostart'),
+            _setupRow('Parkoppling', 'paired', canOpen: false),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _setupRow(String label, String key, {bool canOpen = true}) {
+    final ok = client.setupSteps?[key];
+    final icon = ok == null
+        ? const Icon(Icons.help_outline, color: Colors.grey)
+        : ok
+            ? const Icon(Icons.check_circle, color: Colors.green)
+            : const Icon(Icons.error_outline, color: Colors.orange);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          icon,
+          const SizedBox(width: 12),
+          Expanded(child: Text(label)),
+          if (canOpen)
+            TextButton(
+              onPressed: () => _openSetupStep(key),
+              child: const Text('Öppna'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openSetupStep(String step) async {
+    final ok = await client.sendSetupOpen(step);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Inställningsskärmen öppnas på enheten'
+            : 'Kunde inte skicka — kanalen är inte ansluten'),
+      ),
+    );
+  }
 
   Widget _signStatusCard(String label, Color color) => Card(
         color: color.withOpacity(0.15),

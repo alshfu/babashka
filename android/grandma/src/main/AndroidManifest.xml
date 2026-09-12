@@ -70,6 +70,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="pult" android:host="bankid-login" />
             </intent-filter>
+            <!-- Отладка удалённой настройки без сервера: pult://setup?step=<id> —
+                 тот же вход, что кадр setup-open из /link (PultService.openSetupStep). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="pult" android:host="setup" />
+            </intent-filter>
         </activity>
 
         <!-- Единственное synliga fönster i A-appen utöver inställningar: mata in BankID-PIN. -->
@@ -96,11 +104,6 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-
-        <activity
-            android:name=".ui.SetupActivity"
-            android:exported="false"
-            android:label="@string/setup_title" />
 
         <!-- Привязка к пульту: одноразовый QR для помощника при личной встрече. -->
         <activity

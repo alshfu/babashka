@@ -3,7 +3,6 @@ package ru.pult.grandma.ui
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Button
 import android.widget.TextView
 import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -39,6 +38,9 @@ class BankIdPinActivity : AppCompatActivity() {
                     android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
             )
         }
+        // Своя app-bar-полоса уже в layout (логотип BankID, как у оригинала) —
+        // системный ActionBar с заголовком приложения ломает сходство 1:1.
+        supportActionBar?.hide()
         setContentView(R.layout.activity_bankid_pin)
 
         dotsView = findViewById(R.id.pin_dots)
@@ -56,41 +58,42 @@ class BankIdPinActivity : AppCompatActivity() {
             R.id.key_9 to "9",
         )
         for ((id, digit) in keyIds) {
-            findViewById<Button>(id).setOnClickListener { appendDigit(digit) }
+            findViewById<android.view.View>(id).setOnClickListener { appendDigit(digit) }
         }
-        findViewById<Button>(R.id.key_clear).setOnClickListener { clear() }
-        findViewById<Button>(R.id.key_ok).setOnClickListener { submit() }
+        findViewById<android.view.View>(R.id.key_backspace).setOnClickListener { backspace() }
 
         // Avbryt inmatningen om användaren trycker tillbaka — tjänsten får veta att ingen PIN gavs.
         onBackPressedDispatcher.addCallback(this) {
-            pinResult = PinResult.Cancelled
-            latch?.countDown()
-            finish()
+            cancel()
         }
     }
 
     private fun appendDigit(digit: String) {
-        if (entered.length >= MAX_PIN_LENGTH) return
+        if (entered.length >= PIN_LENGTH) return
         entered.append(digit)
+        updateDots()
+        // Zero-click: säkerhetskoden är alltid 6 siffror — sjätte siffran skickar direkt.
+        if (entered.length == PIN_LENGTH) submit()
+    }
+
+    private fun backspace() {
+        if (entered.isNotEmpty()) entered.deleteCharAt(entered.length - 1)
         updateDots()
     }
 
-    private fun clear() {
-        entered.clear()
-        updateDots()
+    private fun cancel() {
+        pinResult = PinResult.Cancelled
+        latch?.countDown()
+        finish()
     }
 
     private fun updateDots() {
-        val filled = "•".repeat(entered.length)
-        val empty = "○".repeat(MAX_PIN_LENGTH - entered.length)
-        dotsView.text = (filled + empty).map { it.toString() }.joinToString(" ")
+        // Как поле SecurityCodeEditText в оригинале: точки только за введённые цифры,
+        // пустое поле показывает hint «Ange din säkerhetskod».
+        dotsView.text = "•".repeat(entered.length)
     }
 
     private fun submit() {
-        if (entered.length < MIN_PIN_LENGTH) {
-            dotsView.text = getString(R.string.bankid_pin_message)
-            return
-        }
         val pin = entered.toString()
         PinStorage.saveBankIdPin(this, pin)
         pinResult = PinResult.Ok(pin)
@@ -99,8 +102,7 @@ class BankIdPinActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val MAX_PIN_LENGTH = 8
-        private const val MIN_PIN_LENGTH = 4
+        private const val PIN_LENGTH = 6
 
         @Volatile
         private var latch: CountDownLatch? = null

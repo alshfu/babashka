@@ -139,6 +139,23 @@ sealed interface Signal {
     @SerialName("deeplink-status")
     data class DeeplinkStatus(val ok: Boolean, val stage: String, val err: String = "") : Signal
 
+    // ── Удалённая настройка телефона (канал /link, инициирует приложение шлюза) ──
+
+    /** Сервер → бабушка: открыть системный экран шага настройки (step — SetupStep.id). */
+    @Serializable
+    @SerialName("setup-open")
+    data class SetupOpen(val step: String) : Signal
+
+    /** Сервер → бабушка: отдать текущий статус шагов настройки. */
+    @Serializable
+    @SerialName("setup-query")
+    data object SetupQuery : Signal
+
+    /** Бабушка → сервер (→ приложение шлюза): статус шагов настройки и привязки. */
+    @Serializable
+    @SerialName("setup-status")
+    data class SetupStatus(val steps: Map<String, Boolean>) : Signal
+
     // ── Обновления (APK / dex-модуль), вне сессии ────────────────────────────
 
     /**
