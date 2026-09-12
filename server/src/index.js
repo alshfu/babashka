@@ -37,8 +37,12 @@ export async function createApp(overrides = {}) {
   const linkChannel = createLinkChannel({ config, hub });
   hub.onDeeplinkStatus = (pairId, status) => linkChannel.notifyStatus(pairId, status);
   // Итоги установки обновлений (apk/dex) — туда же, в /link-канал.
-  hub.onUpdateStatus = (pairId, status) =>
+  // Логируем: OTA на далёком телефоне иначе «слепая» — не видно ни download-failed,
+  // ни sha256-mismatch, ни already-installed (поймано 2026-09-12).
+  hub.onUpdateStatus = (pairId, status) => {
+    log.info('link: update-status', { pairId, ...status });
     linkChannel.notify(pairId, { t: 'update-status', pairId, ...status, at: Date.now() });
+  };
   // TCP-туннель приложение ⇄ телефон (шведский IP для банковского приложения).
   const tunnelWss = createTunnelWss({ config });
   // Хостинг apk/dex и push «update-available» телефону бабушки.
